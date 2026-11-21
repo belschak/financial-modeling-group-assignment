@@ -1,0 +1,23 @@
+{
+  "first_daily": {
+    "SPY": "1993-01-29",
+    "EFA": "2001-08-27",
+    "IEF": "2002-07-30",
+    "VNQ": "2004-09-29",
+    "DBC": "2006-02-06"
+  },
+  "sources": {
+    "prices": {
+      "SPY": "yahoo_chart_api",
+      "EFA": "yahoo_chart_api",
+      "IEF": "yahoo_chart_api",
+      "VNQ": "yahoo_chart_api",
+      "DBC": "yahoo_chart_api"
+    },
+    "rf_USD": "FRED TB3MS",
+    "rf_EUR": "FRED IR3TIB01EZM156N (+ ECB 3m Euribor after 2026-02)",
+    "fx": "FRED DEXUSEU (daily, last obs. of month, USD per EUR)"
+  },
+  "retrieved_at": "2026-11-20 23:57 UTC",
+  "note": "Monthly inputs as returned by fm_backtest.load_data(); rf already converted to monthly decimals."
+}

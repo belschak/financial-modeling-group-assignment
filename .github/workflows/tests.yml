@@ -1,0 +1,27 @@
+# Runs the test suite on the exact pinned dependencies (requirements.txt), the stack Streamlit Cloud installs.
+name: tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt pytest==8.3.4
+      - run: python -c "import pandas, numpy, streamlit, yfinance; print(pandas.__version__, numpy.__version__, streamlit.__version__, yfinance.__version__)"
+      - run: pytest -q
+      - name: App starts without errors (headless smoke test on the stored snapshot)
+        run: |
+          python - <<'PY'
+          from streamlit.testing.v1 import AppTest
+          at = AppTest.from_file("app.py", default_timeout=120)
+          at.session_state["data_pref"] = "snapshot"
+          at.run()
+          assert not at.exception, at.exception
+          print("metrics shown:", [m.label for m in at.metric][:6])
+          PY
