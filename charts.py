@@ -20,7 +20,8 @@ def _layout(fig: go.Figure, p: dict, ytitle: str, height: int = 380, yfmt: str |
         paper_bgcolor=p["paper"], plot_bgcolor=p["paper"],
         font=dict(family=FONT, size=13),
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)",
+                    entrywidth=168, entrywidthmode="pixels", font=dict(size=12)),
     )
     fig.update_xaxes(showgrid=False, showline=True, linecolor=p["grid"], ticks="outside", tickcolor=p["grid"])
     fig.update_yaxes(title=dict(text=ytitle, font=dict(color=p["muted"], size=12)), showgrid=True, gridcolor=p["grid"],
@@ -55,13 +56,16 @@ def weights_area(w: pd.DataFrame, names: dict[str, str], p: dict) -> go.Figure:
     fig = go.Figure()
     cols = [c for c in w.columns if c != "CASH"]
     for i, c in enumerate(cols):
-        fig.add_trace(go.Scatter(x=w.index, y=w[c], name=f"{names.get(c, c)} ({c})", stackgroup="one", mode="lines",
-                                 line=dict(width=0.4, color=p["assets"][i % len(p["assets"])]),
+        col = p["assets"][i % len(p["assets"])]
+        fig.add_trace(go.Scatter(x=w.index, y=w[c], name=f"{c} · {names.get(c, c).split(' (')[0]}", stackgroup="one",
+                                 mode="lines", line=dict(width=0, color=col, shape="hv"), fillcolor=col,
                                  hovertemplate="%{y:.0%}"))
-    fig.add_trace(go.Scatter(x=w.index, y=w["CASH"], name="Cash (risk-free rate)", stackgroup="one", mode="lines",
-                             line=dict(width=0.4, color=p["cash"]), hovertemplate="%{y:.0%}"))
-    fig = _layout(fig, p, "Share of portfolio at start of month", height=340, yfmt=".0%")
-    fig.update_yaxes(range=[0, 1])
+    fig.add_trace(go.Scatter(x=w.index, y=w["CASH"], name="Cash", stackgroup="one", mode="lines",
+                             line=dict(width=0, color=p["cash"], shape="hv"), fillcolor=p["cash"],
+                             hovertemplate="%{y:.0%}"))
+    fig = _layout(fig, p, "Share of portfolio held during the month", height=340, yfmt=".0%")
+    fig.update_layout(legend=dict(traceorder="normal", entrywidth=190))
+    fig.update_yaxes(range=[0, 1.0001], showgrid=False)
     return fig
 
 
@@ -72,10 +76,10 @@ def cost_curve(grid: pd.DataFrame, chosen: float, breakeven: float | None, label
     fig.add_trace(go.Scatter(x=grid.index, y=grid["benchmark"], name=labels[1], mode="lines",
                              line=dict(color=p["b1"], width=2, dash="dash"), hovertemplate="%{y:.2%}"))
     fig.add_vline(x=chosen, line=dict(color=p["muted"], width=1, dash="dot"),
-                  annotation_text="your setting", annotation_position="top left", annotation_font_color=p["muted"])
+                  annotation_text="your setting", annotation_position="bottom left", annotation_font_color=p["muted"])
     if breakeven is not None:
         fig.add_vline(x=breakeven, line=dict(color=p["loss"], width=1),
-                      annotation_text=f"breakeven {breakeven:.0f} bps", annotation_position="top right",
+                      annotation_text=f"breakeven {breakeven:.0f} bps", annotation_position="bottom right",
                       annotation_font_color=p["loss"])
     fig = _layout(fig, p, "Growth rate p.a. (CAGR), net of costs", height=320, yfmt=".1%")
     fig.update_xaxes(title=dict(text="One-way trading cost (basis points)", font=dict(color=p["muted"], size=12)))

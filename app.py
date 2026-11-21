@@ -22,7 +22,7 @@ GROUP = ("Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülli
          "Bastian Volkery")
 
 st.set_page_config(page_title="BP Trend-Guarded Multi-Asset | Backtest", page_icon="📈", layout="wide",
-                   initial_sidebar_state="expanded")
+                   initial_sidebar_state="auto")
 
 st.markdown(
     """
@@ -34,11 +34,14 @@ st.markdown(
       .lede { font-size: 1.02rem; line-height: 1.55; max-width: 60rem; opacity: .92; margin-top: -.3rem; }
       .src { font-size: .78rem; opacity: .7; line-height: 1.45; }
       .block-container { padding-top: 2.4rem; max-width: 76rem; }
+      .meta { text-align: right; }
+      @media (max-width: 640px) { .meta { text-align: left; } }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+ENGINE_SHA = fb.engine_sha256()
 REBAL = {"M": "Monthly", "Q": "Quarterly", "A": "Annually", "none": "Never (only on signal switches)"}
 
 # ---------------------------------------------------------------- state
@@ -83,7 +86,8 @@ def get_data(pref: str) -> tuple[dict, str | None]:
 
 
 @st.cache_data(show_spinner="Running the backtest...", max_entries=128)
-def run_cached(ui_items: tuple, pref: str, data_stamp: str) -> core.Result:
+def run_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> core.Result:
+    # engine_sha is part of the cache key: a new engine version never reuses old results.
     data, _ = get_data(pref)
     ui = dict(ui_items)
     ui["tickers"] = list(ui["tickers"])
@@ -182,7 +186,7 @@ if (pd.Period(ui["end"], "M") - pd.Period(ui["start"], "M")).n < 23:
 
 try:
     res = run_cached(tuple(sorted(ui.items())), st.session_state["data_pref"],
-                     f"{data['origin']}|{data['retrieved_at']}")
+                     f"{data['origin']}|{data['retrieved_at']}", ENGINE_SHA)
 except ValueError as e:
     msg = f"The backtest cannot run with these settings: {e}"
     if "Not enough history" in str(e):
@@ -199,9 +203,10 @@ S, P = core.STRATEGY, res.primary
 bn = P.split(" ", 1)[0]
 ccy = ui["base_ccy"]
 pal = charts.PALETTE
+LBL_S, LBL_G = "Strategy (net)", "Strategy before costs"
 styles = {
-    S: dict(color=pal["strategy"], width=2.6),
-    f"{S} (before costs)": dict(color=pal["strategy"], width=1.2, dash="dot"),
+    LBL_S: dict(color=pal["strategy"], width=2.6),
+    LBL_G: dict(color=pal["strategy"], width=1.2, dash="dot"),
     core.BENCH_B1: dict(color=pal["b1"], width=2),
     core.BENCH_B2: dict(color=pal["b2"], width=2, dash="dash"),
 }
@@ -209,7 +214,7 @@ first, last = res.index[0], res.index[-1]
 w_s, w_b = core.wealth(res.strat_net), core.wealth(res.bench_net[P])
 
 with h2:
-    st.markdown(f"<div class='src' style='text-align:right'>{first:%b %Y} to {last:%b %Y} · {len(res.index)} months · "
+    st.markdown(f"<div class='src meta'>{first:%b %Y} to {last:%b %Y} · {len(res.index)} months · "
                 f"{ccy} · net of {ui['cost_bps']} bps trading costs</div>", unsafe_allow_html=True)
 
 st.markdown(
@@ -220,11 +225,15 @@ st.markdown(
 
 
 def pct(x, d=1):
-    return "n/a" if x is None or pd.isna(x) else f"{x:.{d}%}"
+    if x is None or pd.isna(x):
+        return "n/a"
+    return f"{0.0 if abs(x) < 0.5 * 10 ** -(d + 2) else x:.{d}%}"  # no "-0.0%"
 
 
 def num(x, d=2):
-    return "n/a" if x is None or pd.isna(x) else f"{x:.{d}f}"
+    if x is None or pd.isna(x):
+        return "n/a"
+    return f"{0.0 if abs(x) < 0.5 * 10 ** -d else x:.{d}f}"
 
 
 HELP = {
@@ -266,9 +275,9 @@ with t_perf:
     c1, c2 = st.columns(2)
     log = c1.toggle("Log scale", value=False, help="Equal distances on the axis = equal percentage changes.")
     show_gross = c2.toggle("Show strategy before costs", value=False)
-    wealth = {S: w_s}
+    wealth = {LBL_S: w_s}
     if show_gross:
-        wealth[f"{S} (before costs)"] = core.wealth(res.strat_gross)
+        wealth[LBL_G] = core.wealth(res.strat_gross)
     for b in (core.BENCH_B1, core.BENCH_B2):
         wealth[b] = core.wealth(res.bench_net[b])
     st.markdown(f"##### Growth of 1 {ccy}, net of costs")
@@ -276,7 +285,7 @@ with t_perf:
                "performance of a real fund.")
     st.plotly_chart(charts.cumulative(wealth, styles, pal, log=log), width="stretch", config={"displayModeBar": False})
     st.markdown("##### Drawdown: fall from the previous high")
-    dd = {S: core.drawdown(res.strat_net)}
+    dd = {LBL_S: core.drawdown(res.strat_net)}
     dd.update({b: core.drawdown(res.bench_net[b]) for b in (core.BENCH_B1, core.BENCH_B2)})
     st.plotly_chart(charts.drawdowns(dd, styles, pal), width="stretch", config={"displayModeBar": False})
     st.markdown("<div class='src'>Source: Yahoo Finance (adjusted close, dividends reinvested), FRED, ECB; group "
@@ -305,9 +314,12 @@ with t_table:
     cols = [S, f"{S} (before costs)", core.BENCH_B1, core.BENCH_B2]
     table = pd.DataFrame({c: [f(M.loc[k, c]) if k in M.index else "n/a" for k, _, f, _ in ROWS] for c in cols},
                          index=[lbl for _, lbl, _, _ in ROWS])
-    table.columns = ["Strategy (net)", "Strategy (before costs)", "B1 Static 1/n", "B2 Classic 60/40"]
+    table.columns = ["Strategy (net)", "Before costs", "B1 Static 1/n", "B2 60/40"]
     table.insert(0, "Brief", ["Required" if req else "Extra" for *_, req in ROWS])
-    st.dataframe(table, width="stretch", height=35 * (len(ROWS) + 1) + 3)
+    table.insert(0, "Measure", table.index)
+    st.dataframe(table, width="stretch", hide_index=True, height=35 * (len(ROWS) + 1) + 3,
+                 column_config={"Measure": st.column_config.TextColumn(width="medium", pinned=True),
+                                "Brief": st.column_config.TextColumn(width="small")})
     st.caption(f"Monthly data, {first:%b %Y} to {last:%b %Y}, in {ccy}. Excess returns use the {ccy} risk-free rate. "
                f"Relative measures are against {P}; a benchmark against itself gives beta 1, alpha 0 (sanity check).")
     out = pd.DataFrame({"strategy_net": res.strat_net, "strategy_gross": res.strat_gross,
@@ -344,7 +356,7 @@ with t_cost:
     st.markdown("##### Growth rate at different trading costs")
     grid = res.cost_grid[["Strategy", P]].rename(columns={"Strategy": "strategy", P: "benchmark"})
     be_plot = be if (be is not None and not math.isinf(be) and be <= 100) else None
-    st.plotly_chart(charts.cost_curve(grid, ui["cost_bps"], be_plot, ("Strategy (net)", P), pal), width="stretch",
+    st.plotly_chart(charts.cost_curve(grid, ui["cost_bps"], be_plot, (LBL_S, P), pal), width="stretch",
                     config={"displayModeBar": False})
     st.caption("The return edge over the same assets held statically is thin and cost-sensitive; the risk edge "
                "(volatility, drawdown) holds at every cost level shown.")
@@ -377,7 +389,7 @@ minus beta x benchmark mean excess return, x 12, with its OLS t-statistic (Newey
 explicit start value of 1.00.
 
 **Same code as the notebook.** All numbers come from `fm_backtest.py` version {fb.ENGINE_VERSION}
-(SHA-256 `{fb.engine_sha256()[:16]}...`), the engine file the submitted notebook runs. Tests in the repository check
+(SHA-256 `{ENGINE_SHA[:16]}...`), the engine file the submitted notebook runs. Tests in the repository check
 that both files are byte-identical and that these defaults reproduce the notebook's results.
 
 **Limitations.** A backtest is not a forecast. US-listed proxies; no taxes and no fund fees beyond those already in
