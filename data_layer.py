@@ -12,6 +12,7 @@ No Streamlit import here; the app adds caching.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +32,9 @@ def download_config(end: str | None = None) -> dict:
 
 
 def load_live(end: str | None = None) -> dict:
+    # Test hook: FM_SIMULATE_LIVE_FAILURE=1 makes the live download fail, to check the snapshot fallback path.
+    if os.environ.get("FM_SIMULATE_LIVE_FAILURE") == "1":
+        raise ConnectionError("simulated Yahoo Finance rate limit (FM_SIMULATE_LIVE_FAILURE=1)")
     data = fb.load_data(download_config(end))
     data["origin"] = "live"
     return data

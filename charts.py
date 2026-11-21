@@ -156,7 +156,7 @@ def signal_strip(signals: pd.DataFrame, names: dict, p: dict) -> go.Figure:
         hovertemplate="%{y}<br>%{x|%b %Y}: %{customdata}<extra></extra>"))
     fig = _layout(fig, p, "", height=60 + 34 * len(labels))
     fig.update_layout(hovermode="closest", showlegend=False, margin=dict(l=8, r=8, t=8, b=8))
-    fig.update_yaxes(showgrid=False, autorange="reversed", title=None)
+    fig.update_yaxes(type="category", showgrid=False, autorange="reversed", title=None, automargin=True)
     return fig
 
 

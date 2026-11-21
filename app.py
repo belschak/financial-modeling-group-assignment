@@ -447,10 +447,10 @@ with t_crisis:
                         label_visibility="collapsed")
         s0, s1, lbl = next(c for c in in_sample if c[2] == pick)
         cv = core.crisis_view(res, s0, s1)
+        st.markdown(f"**Return over the crisis window, {cv['window'][0]:%b %Y} to {cv['window'][1]:%b %Y}**")
         cols = st.columns(len(cv["returns"]))
         for colw, (name, v) in zip(cols, cv["returns"].items()):
-            colw.metric(f"{LBL_S if name == 'Strategy' else name}, {cv['window'][0]:%b %Y} to {cv['window'][1]:%b %Y}",
-                        pct(v))
+            colw.metric(LBL_S if name == "Strategy" else name, pct(v))
         cpaths = {LBL_S if k == "Strategy" else k: v for k, v in cv["paths"].items()}
         st.plotly_chart(charts.crisis_paths(cpaths, styles, cv["window"], pal), width="stretch",
                         config={"displayModeBar": False})

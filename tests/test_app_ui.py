@@ -56,3 +56,14 @@ def test_too_short_history_gives_a_readable_message():
     at.radio(key="signal_lag").set_value(2).run()
     assert not at.exception
     assert any("Move the start" in e.value for e in at.error)
+
+
+def test_live_failure_falls_back_to_snapshot_with_notice(monkeypatch):
+    monkeypatch.setenv("FM_SIMULATE_LIVE_FAILURE", "1")
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=120)
+    at.session_state["data_pref"] = "live"
+    at.run()
+    assert not at.exception, at.exception
+    assert any("Live data unavailable, showing snapshot as of" in w.value for w in at.warning)
+    assert any(m.label == "Sharpe ratio" for m in at.metric)
