@@ -92,7 +92,7 @@ def annual_bars(annual: pd.DataFrame, cols: list[str], labels: list[str], colors
     fig = go.Figure()
     for c, lbl, col in zip(cols, labels, colors):
         fig.add_trace(go.Bar(x=annual.index.astype(str), y=annual[c], name=lbl, marker_color=col,
-                             text=[f"{v:.1%}" for v in annual[c]], textposition="outside", textangle=-90,
+                             text=[f"{0.0 if abs(v) < 0.0005 else v:.1%}" for v in annual[c]], textposition="outside", textangle=-90,
                              textfont=dict(size=10), cliponaxis=False, hovertemplate="%{y:.1%}"))
     fig = _layout(fig, p, "Calendar-year return, net of costs", height=360, yfmt=".0%")
     fig.update_layout(barmode="group", bargap=0.25, bargroupgap=0.05, hovermode="x unified")

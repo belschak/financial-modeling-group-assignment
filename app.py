@@ -252,9 +252,9 @@ with h2:
                 f"{ccy} · net of {ui['cost_bps']} bps trading costs</div>", unsafe_allow_html=True)
 if res.sri:
     with h1:
-        st.badge(f"Indicative risk class {res.sri['sri']} of 7 (PRIIPs SRI, authors' calculation)",
+        st.badge(f"Risk class {res.sri['sri']} of 7 (indicative SRI)",
                  icon=":material/speed:", color="blue",
-                 help="1 = lowest, 7 = highest risk. Computed like an EU key information document from the last 60 "
+                 help="PRIIPs summary risk indicator, authors' calculation. 1 = lowest, 7 = highest risk. Computed like an EU key information document from the last 60 "
                       "monthly returns over a 10-year holding period, plus one class because only monthly data are "
                       "used; the higher of the strategy and the unfiltered 1/n mix. Indicative only.")
 
