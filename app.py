@@ -48,9 +48,10 @@ DISCLAIMER = "Hypothetical back-tested results. Past performance does not predic
 COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_data(ttl="5m", show_spinner=False)
 def _commit() -> str:
-    """Short git commit of the running code (Streamlit Cloud deploys a git checkout). Read once per server."""
+    """Short git commit of the running code (Streamlit Cloud deploys a git checkout and hot-reloads pushes,
+    so this is re-read every few minutes rather than once per server)."""
     import subprocess
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5,
