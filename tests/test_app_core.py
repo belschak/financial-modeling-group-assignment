@@ -34,9 +34,9 @@ def test_benchmark_against_itself():
 def test_every_user_setting_changes_or_runs():
     data = fb.synthetic_data()
     base = core.run(dict(core.DEFAULTS), data).metrics.loc["sharpe", core.STRATEGY]
-    variants = [dict(cost_bps=50), dict(sma_months=6), dict(signal_lag=2), dict(rebalance="Q"),
+    variants = [dict(cost_bps=50), dict(sma_window=6), dict(signal_lag=2), dict(rebalance="Q"),
                 dict(base_ccy="USD"), dict(start="2012-01"), dict(tickers=("SPY", "IEF")),
-                dict(primary_benchmark=core.BENCH_B2)]
+                dict(primary_benchmark=core.BENCH_B2), dict(hedge=False)]
     for v in variants:
         r = core.run({**core.DEFAULTS, **v}, data)
         assert np.isfinite(r.metrics.loc["sharpe", core.STRATEGY]), v
@@ -45,10 +45,21 @@ def test_every_user_setting_changes_or_runs():
 
 def test_b1_follows_selected_assets():
     cfg = core.build_config({**core.DEFAULTS, "tickers": ("SPY", "EFA", "IEF")})
-    assert cfg["benchmarks"][core.BENCH_B1]["weights"] == {"SPY": 1 / 3, "EFA": 1 / 3, "IEF": 1 / 3}
+    assert fb.benchmark_weights(cfg, core.KEY_B1) == {"SPY": 1 / 3, "EFA": 1 / 3, "IEF": 1 / 3}
+
+
+def test_engine_features_detected():
+    assert core.HEDGE_KEY and core.HAS_SRI
+    cfg = core.build_config({**core.DEFAULTS, "hedge": False})
+    assert not cfg[core.HEDGE_KEY]
+    res = core.run(dict(core.DEFAULTS), fb.synthetic_data())
+    assert 1 <= res.sri["sri"] <= 7
+    mc = core.monte_carlo(res)
+    assert set(mc["bands"]) == {"Strategy", core.BENCH_B2}
 
 
 @pytest.mark.skipif(not dl.snapshot_available(), reason="no stored snapshot")
 def test_snapshot_round_trip_runs():
     res = core.run(dict(core.DEFAULTS), dl.load_snapshot())
     assert len(res.index) == 228 and res.index[0] == pd.Timestamp("2007-01-31")
+    assert res.annual.index.min() == 2007 and res.annual.index.max() == 2025

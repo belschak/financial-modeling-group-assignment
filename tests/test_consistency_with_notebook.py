@@ -26,7 +26,7 @@ ALIASES = {
     "tracking_error": ["tracking_error"],
 }
 STRATEGY_KEYS = ["strategy", "Strategy", "strategy_net", core.STRATEGY, f"{core.STRATEGY} (net)"]
-B1_KEYS = ["b1", "B1", core.BENCH_B1]
+B1_KEYS = ["b1", "B1", core.KEY_B1, core.BENCH_B1]
 
 
 def _find(d, keys):
@@ -48,15 +48,8 @@ def _metrics_block(res_json, which):
 
 def _inputs():
     snap = notebook_inputs_snapshot()
-    if snap is not None:
-        meta = snap.with_name("snapshot_meta.json")
-        if meta.exists():
-            old = (dl.SNAP_CSV, dl.SNAP_META)
-            dl.SNAP_CSV, dl.SNAP_META = snap, meta
-            try:
-                return dl.load_snapshot(), 1e-9
-            finally:
-                dl.SNAP_CSV, dl.SNAP_META = old
+    if snap is not None and snap.with_name("snapshot_meta.json").exists():
+        return dl.load_snapshot(snap, snap.with_name("snapshot_meta.json")), 1e-9
     if dl.snapshot_available():
         return dl.load_snapshot(), 2e-3
     pytest.skip("no input data available offline")

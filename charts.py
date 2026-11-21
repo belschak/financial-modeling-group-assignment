@@ -69,18 +69,61 @@ def weights_area(w: pd.DataFrame, names: dict[str, str], p: dict) -> go.Figure:
     return fig
 
 
-def cost_curve(grid: pd.DataFrame, chosen: float, breakeven: float | None, labels: tuple[str, str], p: dict) -> go.Figure:
+def cost_curve(grid: pd.DataFrame, chosen: float, breakeven: float | None, labels: tuple[str, str], p: dict,
+               ytitle: str = "Growth rate p.a. (CAGR), net of costs", yfmt: str = ".1%") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=grid.index, y=grid["strategy"], name=labels[0], mode="lines+markers",
-                             line=dict(color=p["strategy"], width=2), marker=dict(size=5), hovertemplate="%{y:.2%}"))
+                             line=dict(color=p["strategy"], width=2), marker=dict(size=5), hovertemplate="%{y:" + yfmt + "}"))
     fig.add_trace(go.Scatter(x=grid.index, y=grid["benchmark"], name=labels[1], mode="lines",
-                             line=dict(color=p["b1"], width=2, dash="dash"), hovertemplate="%{y:.2%}"))
+                             line=dict(color=p["b1"], width=2, dash="dash"), hovertemplate="%{y:" + yfmt + "}"))
     fig.add_vline(x=chosen, line=dict(color=p["muted"], width=1, dash="dot"),
                   annotation_text="your setting", annotation_position="bottom left", annotation_font_color=p["muted"])
     if breakeven is not None:
         fig.add_vline(x=breakeven, line=dict(color=p["loss"], width=1),
                       annotation_text=f"breakeven {breakeven:.0f} bps", annotation_position="bottom right",
                       annotation_font_color=p["loss"])
-    fig = _layout(fig, p, "Growth rate p.a. (CAGR), net of costs", height=320, yfmt=".1%")
+    fig = _layout(fig, p, ytitle, height=320, yfmt=yfmt)
     fig.update_xaxes(title=dict(text="One-way trading cost (basis points)", font=dict(color=p["muted"], size=12)))
     return fig
+
+
+def annual_bars(annual: pd.DataFrame, cols: list[str], labels: list[str], colors: list[str], p: dict) -> go.Figure:
+    """Calendar-year returns, strategy next to the benchmark (PRIIPs style: x-axis at 0%, a label on every bar)."""
+    fig = go.Figure()
+    for c, lbl, col in zip(cols, labels, colors):
+        fig.add_trace(go.Bar(x=annual.index.astype(str), y=annual[c], name=lbl, marker_color=col,
+                             text=[f"{v:.1%}" for v in annual[c]], textposition="outside", textangle=-90,
+                             textfont=dict(size=10), cliponaxis=False, hovertemplate="%{y:.1%}"))
+    fig = _layout(fig, p, "Calendar-year return, net of costs", height=360, yfmt=".0%")
+    fig.update_layout(barmode="group", bargap=0.25, bargroupgap=0.05, hovermode="x unified")
+    fig.update_yaxes(zeroline=True, zerolinecolor=p["muted"], zerolinewidth=1)
+    fig.update_xaxes(type="category", showline=False, ticks="")
+    return fig
+
+
+def fan_chart(bands: dict, labels: dict, colors: dict, p: dict, lo: str, hi: str, initial: float) -> go.Figure:
+    """Monte Carlo outcome ranges over time: outer band lo-hi, inner band p25-p75, median line."""
+    fig = go.Figure()
+    for name, b in bands.items():
+        col = colors[name]
+        x = b.index / 12.0
+        rgba = _rgba(col, 0.13)
+        rgba_in = _rgba(col, 0.26)
+        fig.add_trace(go.Scatter(x=x, y=b[hi], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=x, y=b[lo], mode="lines", line=dict(width=0), fill="tonexty", fillcolor=rgba,
+                                 showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=x, y=b["p75"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=x, y=b["p25"], mode="lines", line=dict(width=0), fill="tonexty", fillcolor=rgba_in,
+                                 showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=x, y=b["p50"], mode="lines", name=f"{labels[name]}: median",
+                                 line=dict(color=col, width=2.4), hovertemplate="%{y:,.0f}"))
+    fig.add_hline(y=initial, line=dict(color=p["muted"], width=1, dash="dot"))
+    fig = _layout(fig, p, "Value of the investment", height=360, yfmt=",.0f")
+    fig.update_xaxes(title=dict(text="Years from today", font=dict(color=p["muted"], size=12)), dtick=1)
+    return fig
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"

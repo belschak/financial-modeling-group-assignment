@@ -42,6 +42,22 @@ st.markdown(
 )
 
 ENGINE_SHA = fb.engine_sha256()
+DISCLAIMER = "Hypothetical back-tested results. Past performance does not predict future returns."
+COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
+
+
+def _commit() -> str:
+    """Short git commit of the running code (Streamlit Cloud deploys a git checkout)."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5,
+                             cwd=str(dl.DATA_DIR.parent))
+        return out.stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+COMMIT = _commit()
 REBAL = {"M": "Monthly", "Q": "Quarterly", "A": "Annually", "none": "Never (only on signal switches)"}
 
 # ---------------------------------------------------------------- state
@@ -59,28 +75,30 @@ def reset_defaults():
 
 
 # ---------------------------------------------------------------- data + runs (cached)
-@st.cache_data(ttl=6 * 3600, show_spinner="Downloading prices (Yahoo Finance) and rates (FRED, ECB)...")
-def live_data() -> dict:
+@st.cache_data(ttl="12h", show_spinner="Downloading prices (Yahoo Finance) and rates (FRED, ECB)...")
+def live_data(engine_sha: str) -> dict:
+    # engine_sha in the cache key: a new engine (new data sources) never reuses an old download.
     return dl.load_live()  # raises on failure, and failures are never cached
 
 
 @st.cache_data(show_spinner=False)
-def snapshot_data() -> dict:
+def snapshot_data(file_stamp: float) -> dict:
     return dl.load_snapshot()
 
 
 def get_data(pref: str) -> tuple[dict, str | None]:
     """Returns (data, warning). Live first; on failure the stored snapshot, with a visible warning."""
     if pref == "snapshot":
-        return snapshot_data(), None
+        return snapshot_data(dl.SNAP_CSV.stat().st_mtime), None
     try:
-        return live_data(), None
+        return live_data(ENGINE_SHA), None
     except Exception as e:  # noqa: BLE001
         if dl.snapshot_available():
-            return snapshot_data(), (
-                f"The live download failed just now ({type(e).__name__}). Yahoo Finance often limits requests from "
-                "cloud servers, so the app is showing the stored data snapshot (same sources, same code). "
-                "Reload in a few minutes for live data.")
+            snap = snapshot_data(dl.SNAP_CSV.stat().st_mtime)
+            return snap, (
+                f"Live data unavailable, showing snapshot as of {snap['retrieved_at']}. "
+                f"({type(e).__name__}: Yahoo Finance sometimes throttles shared cloud servers; same sources and "
+                "same code, reload in a few minutes for live data.)")
         raise
 
 
@@ -91,6 +109,12 @@ def run_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> 
     ui = dict(ui_items)
     ui["tickers"] = list(ui["tickers"])
     return core.run(ui, data)
+
+
+@st.cache_data(show_spinner="Simulating 10,000 ten-year paths...", max_entries=32)
+def mc_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
+    # Cached per settings: the Monte Carlo is not recomputed when nothing it depends on changed.
+    return core.monte_carlo(run_cached(ui_items, pref, data_stamp, engine_sha))
 
 
 # ---------------------------------------------------------------- load data first (sidebar needs the date range)
@@ -109,9 +133,10 @@ with st.sidebar:
     st.caption("Change any input and every number recalculates. The defaults reproduce the prospectus and the notebook.")
 
     st.markdown("**Trend rule**")
-    st.slider("Moving-average window (months)", 3, 24, key="sma_months",
+    st.slider("Moving-average window (months)", *core.SMA_RANGE, key="sma_window",
               help="An asset is held only while its month-end price is above its average price over this many "
-                   "months. 10 comes from Faber (2007); we did not optimise it.")
+                   "months. 10 comes from Faber (2007); we did not optimise it. 6 to 12 is the range Faber shows "
+                   "works similarly (a stability check, not a search for the best value).")
     st.radio("Signal delay (months)", [1, 2], key="signal_lag", horizontal=True,
              help="1: the signal from the close of month t sets the holdings for month t+1. 2: act one month "
                   "later, a fully safe version with zero look-ahead risk.")
@@ -120,15 +145,21 @@ with st.sidebar:
                       "a trade back to target at that month-end.")
 
     st.markdown("**Costs**")
-    st.slider("Trading cost (bps per trade, one-way)", 0, 100, step=1, key="cost_bps",
-              help="Charged on every euro bought or sold (1 bp = 0.01%). 10 bps is a typical all-in cost of an "
-                   "ETF trade at an EU online broker. Benchmarks pay the same cost on their trades.")
+    st.select_slider("Trading cost (bps per trade, one-way)", options=COST_STEPS, key="cost_bps",
+                     help="Charged on every euro bought or sold (1 bp = 0.01%). 10 bps = fund-level trading cost "
+                          "(base case). 50 bps = the lecture's conservative all-in figure for a retail investor "
+                          "trading the ETFs alone (stress case). Benchmarks pay the same cost on their trades.")
 
     st.markdown("**Investor**")
     st.radio("Base currency", ["EUR", "USD"], key="base_ccy", horizontal=True,
-             help="EUR: US-listed fund returns converted to euro without currency hedging; cash earns the euro "
-                  "3-month rate. USD: no conversion; cash earns the US 3-month T-bill rate. Trade signals always "
-                  "use each fund's own USD price.")
+             help="EUR: US-listed fund returns converted to euro; cash earns the euro short-term rate. USD: no "
+                  "conversion; cash earns the US 3-month T-bill rate. Trade signals always use each fund's own USD "
+                  "price.")
+    if core.HEDGE_KEY:
+        st.toggle("Hedge bond sleeve to EUR", key="hedge", disabled=st.session_state["base_ccy"] != "EUR",
+                  help="On: the US Treasury slice is currency-hedged (its return plus the EUR-USD rate difference), "
+                       "as a euro investor would usually hold bonds. Equities, real estate and commodities stay "
+                       "unhedged. Applies to the strategy and both benchmarks.")
     # value= makes it a RANGE slider (without it Streamlit treats it as single-value and resets the range).
     default_period = (core.DEFAULTS["start"], min(core.DEFAULTS["end"], months[-1]))
     if "period" in st.session_state and any(m not in months for m in st.session_state["period"]):
@@ -145,15 +176,14 @@ with st.sidebar:
 
     st.markdown("**Benchmark for alpha, beta and IR**")
     st.radio("Benchmark", [core.BENCH_B1, core.BENCH_B2], key="primary_benchmark", label_visibility="collapsed",
-             format_func=lambda b: {core.BENCH_B1: "B1 Static 1/n (same assets)",
-                                    core.BENCH_B2: "B2 Classic 60/40"}[b],
+             format_func=lambda b: {core.BENCH_B1: f"{core.BENCH_B1} (same assets)"}.get(b, b),
              help="B1 holds the same assets in equal weights, rebalanced monthly, so it isolates what the trend "
                   "filter adds. B2 is the 60% equity / 40% bond mix the client could buy instead.")
 
     with st.expander("Data source"):
         st.radio("Data", ["live", "snapshot"], key="data_pref", label_visibility="collapsed",
                  format_func=lambda s: "Live: Yahoo Finance, FRED, ECB" if s == "live" else "Stored snapshot (offline)")
-        st.caption("Live data are cached for 6 hours. The snapshot only steps in if Yahoo blocks the server.")
+        st.caption("Live data are cached for 12 hours. The snapshot only steps in if Yahoo throttles the server.")
 
     st.button("Reset to prospectus defaults", on_click=reset_defaults, width="stretch")
 
@@ -173,9 +203,11 @@ st.markdown(
 h1, h2 = st.columns([1, 1], vertical_alignment="center")
 with h1:
     if is_default:
-        st.badge("Defaults = prospectus", icon=":material/verified:", color="green")
+        st.badge("Defaults: matches prospectus Table 1", icon=":material/verified:", color="green")
     else:
         st.badge("Custom assumptions: numbers differ from the prospectus", icon=":material/tune:", color="orange")
+data_as_of = (f"Data as of {data['retrieved_at']} ({'live download' if data['origin'] == 'live' else 'stored snapshot'}), "
+              f"latest complete month {last_month:%b %Y}")
 if data_warning:
     st.warning(data_warning, icon=":material/cloud_off:")
 
@@ -191,10 +223,10 @@ try:
                      f"{data['origin']}|{data['retrieved_at']}", ENGINE_SHA)
 except ValueError as e:
     msg = f"The backtest cannot run with these settings: {e}"
-    if "Not enough history" in str(e):
+    if "not enough" in str(e).lower() and "history" in str(e).lower():
         youngest = max(data["prices_usd"][t].first_valid_index() for t in ui["tickers"])
-        earliest = youngest + pd.offsets.MonthEnd(int(ui["sma_months"]) - 1 + int(ui["signal_lag"]))
-        msg = (f"With a {ui['sma_months']}-month average and a {ui['signal_lag']}-month delay, the youngest selected "
+        earliest = youngest + pd.offsets.MonthEnd(int(ui["sma_window"]) - 1 + int(ui["signal_lag"]))
+        msg = (f"With a {ui['sma_window']}-month average and a {ui['signal_lag']}-month delay, the youngest selected "
                f"fund needs history until {earliest:%b %Y} before the first decision. Move the start of the backtest "
                f"period to {earliest:%Y-%m} or later, or shorten the window.")
     st.error(msg, icon=":material/history:")
@@ -218,12 +250,20 @@ w_s, w_b = core.wealth(res.strat_net), core.wealth(res.bench_net[P])
 with h2:
     st.markdown(f"<div class='src meta'>{first:%b %Y} to {last:%b %Y} · {len(res.index)} months · "
                 f"{ccy} · net of {ui['cost_bps']} bps trading costs</div>", unsafe_allow_html=True)
+if res.sri:
+    with h1:
+        st.badge(f"Indicative risk class {res.sri['sri']} of 7 (PRIIPs SRI, authors' calculation)",
+                 icon=":material/speed:", color="blue",
+                 help="1 = lowest, 7 = highest risk. Computed like an EU key information document from the last 60 "
+                      "monthly returns over a 10-year holding period, plus one class because only monthly data are "
+                      "used; the higher of the strategy and the unfiltered 1/n mix. Indicative only.")
 
 st.markdown(
     f"**10,000 {ccy}** invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y} would have grown to "
     f"**{10000 * w_s.iloc[-1]:,.0f} {ccy}** by {last:%b %Y} ({bn}: {10000 * w_b.iloc[-1]:,.0f} {ccy}). "
     f"Largest fall from a previous high: **{-M.loc['max_drawdown', S]:.1%}** ({bn}: {-M.loc['max_drawdown', P]:.1%})."
 )
+st.caption(DISCLAIMER)
 
 
 def pct(x, d=1):
@@ -271,7 +311,8 @@ for i, (label, value, delta, unit, dcol, key) in enumerate(cards):
         col.metric(label, value, help=HELP[key])
 
 # ---------------------------------------------------------------- tabs
-t_perf, t_table, t_hold, t_cost, t_method = st.tabs(["Performance", "All metrics", "Holdings", "Costs", "Method"])
+t_perf, t_table, t_hold, t_cost, t_mc, t_method = st.tabs(
+    ["Performance", "All metrics", "Holdings", "Costs", "10-year outlook", "Method"])
 
 with t_perf:
     c1, c2 = st.columns(2)
@@ -283,13 +324,17 @@ with t_perf:
     for b in (core.BENCH_B1, core.BENCH_B2):
         wealth[b] = core.wealth(res.bench_net[b])
     st.markdown(f"##### Growth of 1 {ccy}, net of costs")
-    st.caption("Past performance does not predict future returns. Hypothetical back-tested results, not the "
-               "performance of a real fund.")
+    st.caption(DISCLAIMER + " The fund did not exist over this period.")
     st.plotly_chart(charts.cumulative(wealth, styles, pal, log=log), width="stretch", config={"displayModeBar": False})
     st.markdown("##### Drawdown: fall from the previous high")
     dd = {LBL_S: core.drawdown(res.strat_net)}
     dd.update({b: core.drawdown(res.bench_net[b]) for b in (core.BENCH_B1, core.BENCH_B2)})
     st.plotly_chart(charts.drawdowns(dd, styles, pal), width="stretch", config={"displayModeBar": False})
+    st.markdown(f"##### Calendar-year returns: strategy vs {bn}")
+    st.caption(DISCLAIMER)
+    st.plotly_chart(charts.annual_bars(res.annual, ["Strategy", P], [LBL_S, P],
+                                       [pal["strategy"], pal["b1"] if P == core.BENCH_B1 else pal["b2"]], pal),
+                    width="stretch", config={"displayModeBar": False})
     st.markdown("<div class='src'>Source: Yahoo Finance (adjusted close, dividends reinvested), FRED, ECB; group "
                 "calculations. All series start at exactly 1.00 on the same date.</div>", unsafe_allow_html=True)
 
@@ -313,6 +358,7 @@ ROWS = [
     ("sortino", "Sortino ratio", num, False),
 ]
 with t_table:
+    st.caption(DISCLAIMER)
     cols = [S, f"{S} (before costs)", core.BENCH_B1, core.BENCH_B2]
     table = pd.DataFrame({c: [f(M.loc[k, c]) if k in M.index else "n/a" for k, _, f, _ in ROWS] for c in cols},
                          index=[lbl for _, lbl, _, _ in ROWS])
@@ -333,6 +379,7 @@ with t_table:
 
 with t_hold:
     cash = res.held[core.CASH]
+    st.caption(DISCLAIMER)
     st.markdown(f"##### On average {1 - cash.mean():.0%} invested and {cash.mean():.0%} in cash")
     st.plotly_chart(charts.weights_area(res.held, core.ASSET_NAMES, pal), width="stretch",
                     config={"displayModeBar": False})
@@ -340,28 +387,73 @@ with t_hold:
                "closes a month below its moving average, and back when it recovers.")
 
 with t_cost:
+    st.caption(DISCLAIMER)
     tv = res.turnover
-    k1, k2, k3 = st.columns(3)
+
+
+    def be_fmt(v, what):
+        if v is None:
+            return "none", f"Even at zero cost the strategy's {what} is below the benchmark's in this setting."
+        if math.isinf(v):
+            return "> 2000 bps", f"The strategy's {what} stays above the benchmark's at any realistic cost."
+        return f"{v:.0f} bps", (f"One-way cost at which the strategy's {what} falls to the benchmark's "
+                                f"(both pay the same cost on their own trades).")
+
+
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Turnover p.a. (one-way)", pct(tv["turnover_pa"], 0),
-              help="Half of the value bought plus sold in a year, as a share of the portfolio (the usual fund "
-                   "definition).")
+              help="Half of the value bought plus sold in a year (one-way, the usual fund definition).")
     k2.metric("Cost drag p.a.", pct(tv["cost_drag_pa"], 2), help="Growth rate lost to trading costs per year.")
-    be = res.breakeven_bps
-    if be is None:
-        be_txt, be_help = "none", "Even at zero cost the strategy grows more slowly than the benchmark in this setting."
-    elif math.isinf(be):
-        be_txt, be_help = "> 2000 bps", "Stays ahead of the benchmark at any realistic cost."
-    else:
-        be_txt, be_help = f"{be:.0f} bps", ("One-way cost at which the strategy's growth rate falls to the "
-                                            "benchmark's (both pay the same cost).")
-    k3.metric(f"Breakeven cost vs {bn}", be_txt, help=be_help)
-    st.markdown("##### Growth rate at different trading costs")
+    t3, h3 = be_fmt(res.breakeven_bps, "growth rate (CAGR)")
+    t4, h4 = be_fmt(res.breakeven_sharpe_bps, "Sharpe ratio")
+    k3.metric(f"Breakeven on return vs {bn}", t3, help=h3)
+    k4.metric(f"Breakeven on Sharpe vs {bn}", t4, help=h4)
+    st.markdown("##### Value of 1 at the end of the sample, at different trading costs")
     grid = res.cost_grid[["Strategy", P]].rename(columns={"Strategy": "strategy", P: "benchmark"})
+    be = res.breakeven_bps
     be_plot = be if (be is not None and not math.isinf(be) and be <= 100) else None
-    st.plotly_chart(charts.cost_curve(grid, ui["cost_bps"], be_plot, (LBL_S, P), pal), width="stretch",
+    st.plotly_chart(charts.cost_curve(grid, ui["cost_bps"], be_plot, (LBL_S, P), pal,
+                                      ytitle=f"Final value of 1 {ccy} invested", yfmt=".2f"), width="stretch",
                     config={"displayModeBar": False})
-    st.caption("The return edge over the same assets held statically is thin and cost-sensitive; the risk edge "
-               "(volatility, drawdown) holds at every cost level shown.")
+    ahead = M.loc["cagr", S] > M.loc["cagr", P]
+    st.caption(f"At {ui['cost_bps']} bps the strategy grows {'faster' if ahead else 'more slowly'} than {bn} "
+               f"({pct(M.loc['cagr', S])} vs {pct(M.loc['cagr', P])} a year). Risk-adjusted (Sharpe) it stays ahead "
+               f"up to {t4} per trade.")
+
+with t_mc:
+    mc = mc_cached(tuple(sorted(ui.items())), st.session_state["data_pref"],
+                   f"{data['origin']}|{data['retrieved_at']}", ENGINE_SHA)
+    cfgm = res.cfg
+    lo, hi = ("p10", "p90") if "p10" in mc["bands"]["Strategy"] else ("p5", "p95")
+    lo_n, hi_n = int(lo[1:]), int(hi[1:])
+    init = mc["initial"]
+    st.markdown(f"##### {init:,.0f} {ccy} over the next {cfgm['mc_years']} years: range of outcomes")
+    st.caption("This shows what could happen if the next 10 years resemble the back-tested period, re-sampled in "
+               f"{cfgm['mc_block']}-month blocks ({mc['n_paths']:,} paths, fixed seed). It is not a forecast: it only "
+               "replays the past sample, assumes its average return persists and ignores taxes. The investment may "
+               "lead to a financial loss. " + DISCLAIMER)
+    st.plotly_chart(charts.fan_chart(mc["bands"], {"Strategy": LBL_S, core.BENCH_B2: core.BENCH_B2},
+                                     {"Strategy": pal["strategy"], core.BENCH_B2: pal["b1"]}, pal, lo, hi, init),
+                    width="stretch", config={"displayModeBar": False})
+    summ = mc["summary"]
+    rows = []
+    for name, lbl in (("Strategy", LBL_S), (core.BENCH_B2, core.BENCH_B2)):
+        sm = summ[name]
+        f_lo = sm.get(lo, sm.get("p5")); f_hi = sm.get(hi, sm.get("p95"))
+        rows.append({"Portfolio": lbl, f"Unfavourable ({lo_n}th pct.)": f"{f_lo:,.0f}",
+                     "Median": f"{sm.get('p50', sm.get('median')):,.0f}", f"Favourable ({hi_n}th pct.)": f"{f_hi:,.0f}",
+                     "Chance of ending below start": pct(sm.get("prob_below_start", sm.get("prob_loss")), 1),
+                     "Chance of a fall > 20% on the way": pct(sm["prob_drawdown_over_20pct"], 1)})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    hc = mc.get("haircut_summary")
+    if hc:
+        st.caption(f"Cautious variant (half of the historical excess return, because published rules tend to work "
+                   f"less well after publication): median {hc['Strategy'].get('p50', hc['Strategy'].get('median')):,.0f} for the strategy and "
+                   f"{hc[core.BENCH_B2].get('p50', hc[core.BENCH_B2].get('median')):,.0f} for {core.BENCH_B2}.")
+    if "prob_first_beats_second" in summ:
+        st.caption(f"The strategy ends ahead of {core.BENCH_B2} in {summ['prob_first_beats_second']:.0%} of the "
+                   f"paths. Bands: dark = middle 50% of paths, light = {lo_n}th to {hi_n}th percentile. "
+                   f"Values in {ccy}, after the trading costs you chose.")
 
 with t_method:
     cfg = res.cfg
@@ -370,18 +462,28 @@ with t_method:
 reduced to the last close of each month. Risk-free rates and FX as downloaded for this run: USD rate
 {data['sources']['rf_USD']}; EUR rate {data['sources']['rf_EUR']}; EUR/USD {data['sources']['fx']}.
 US-listed funds stand in for the UCITS funds an EU investor would buy, because their history is longer.
+In the EUR view, USD returns are converted with r_EUR = (1 + r_USD) x S(t-1) / S(t) - 1 (S = USD per EUR);
+{"the bond slice (IEF) is EUR-hedged: r_USD + (rf_EUR - rf_USD), a covered-interest-parity approximation, while "
+ "equities, real estate and commodities stay unhedged" if (cfg.get(core.HEDGE_KEY) and cfg['base_ccy'] == 'EUR')
+ else "all slices are unhedged in this setting"}.
 
 **Rule.** At each month-end an asset is "in" if its USD price is above its simple moving average of the last
-{cfg['sma_months']} month-end prices (including the current one). Holdings decided at the close of month t are held
+{cfg['sma_window']} month-end prices (including the current one). Holdings decided at the close of month t are held
 during month t+{cfg['signal_lag']}, so every decision uses only information available at the time. Each asset has a
-target of 1/n; a slice that is "out" earns the risk-free rate. Holdings drift between rebalancing dates
-({REBAL[cfg['rebalance']].lower()}); a signal switch always triggers a trade.
+equal capital slice of 1/n, held either in its fund or in cash (the euro overnight rate in EUR, the T-bill rate in
+USD). Slices are reset to equal size {REBAL[cfg['rebalance']].lower()}; signals switch monthly in any case.
 
 **Benchmarks.** B1 = the same assets in static equal weights, rebalanced monthly (what the trend filter adds).
 B2 = 60% equity (SPY 36%, EFA 24%) and 40% IEF, rebalanced monthly (what the client would otherwise buy).
 Both pay the same trading cost on their trades.
 
 **Costs.** {cfg['cost_bps']:.0f} bps one-way on the value of every fund trade, deducted in the month of the trade.
+Turnover = half the sum of absolute weight changes including cash, per year (one-way). Breakeven costs: the cost at
+which the strategy's growth rate (CAGR), or its Sharpe ratio, falls to the benchmark's, with both paying it.
+
+**Risk class.** Indicative PRIIPs summary risk indicator (1 to 7), authors' calculation: Cornish-Fisher VaR from the
+last 60 monthly returns over a 10-year holding period, one class added because only monthly data are used, and the
+higher of the strategy and the unfiltered 1/n mix.
 
 **Measures.** Simple returns throughout (they add up across assets; log returns do not). Average return = monthly
 mean x 12; volatility = sample standard deviation x sqrt(12); Sharpe = mean excess return / its standard
@@ -403,5 +505,6 @@ st.divider()
 links = [f"[Source code on GitHub]({REPO_URL})",
          f"[Backtest notebook (Colab)]({NOTEBOOK_URL})" if NOTEBOOK_URL else "Backtest notebook: submitted with the prospectus"]
 st.markdown(" · ".join(links))
-st.markdown(f"<div class='src'>Nova SBE · 2270 Financial Modeling · Group BP: {GROUP}. Educational project, not "
-            f"investment advice. Data: {dl.describe(data)}.</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='src'>{data_as_of}. Code version {COMMIT}, engine {fb.ENGINE_VERSION} "
+            f"(SHA-256 {ENGINE_SHA[:12]}). Nova SBE · 2270 Financial Modeling · Group BP: {GROUP}. Educational "
+            f"project, not investment advice. {DISCLAIMER} Data: {dl.describe(data)}.</div>", unsafe_allow_html=True)

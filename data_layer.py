@@ -27,8 +27,7 @@ def download_config(end: str | None = None) -> dict:
     """Engine config used for downloading: the default universe up to the last complete month."""
     if end is None:
         end = (pd.Timestamp.today().normalize().replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    # The pre-sample motivation series (^SP500TR) is notebook-only; the app does not need it.
-    return fb.get_config(end=end, motivation_ticker=None)
+    return fb.get_config(end=end)
 
 
 def load_live(end: str | None = None) -> dict:
@@ -37,30 +36,32 @@ def load_live(end: str | None = None) -> dict:
     return data
 
 
+RF_EUR_COL, RF_USD_COL, FX_COL = "RF_EUR_monthly", "RF_USD_monthly_shifted", "FX_USDperEUR"
+
+
 def save_snapshot(data: dict) -> None:
+    """Store the engine's own snapshot table (fm_backtest.snapshot_frame) plus provenance."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    df = data["prices_usd"].copy()
-    df["RF_USD"] = data["rf"]["USD"]
-    df["RF_EUR"] = data["rf"]["EUR"]
-    df["FX_USD_PER_EUR"] = data["fx_usd_per_eur"]
+    df = fb.snapshot_frame(data)
     df.index.name = "month_end"
     df.to_csv(SNAP_CSV, float_format="%.12g")
     meta = dict(first_daily=data["first_daily"], sources=data["sources"], retrieved_at=data["retrieved_at"],
-                note="Monthly inputs as returned by fm_backtest.load_data(); rf already converted to monthly decimals.")
+                n_daily_rows=data.get("n_daily_rows"), engine_version=fb.ENGINE_VERSION,
+                note="fm_backtest.snapshot_frame(load_data(cfg)): month-end USD prices, FX, monthly rf decimals.")
     SNAP_META.write_text(json.dumps(meta, indent=2))
 
 
-def load_snapshot() -> dict:
-    df = pd.read_csv(SNAP_CSV, index_col=0, parse_dates=True)
-    meta = json.loads(SNAP_META.read_text())
-    tick = [c for c in df.columns if c not in ("RF_USD", "RF_EUR", "FX_USD_PER_EUR")]
+def load_snapshot(csv: Path = SNAP_CSV, meta_path: Path = SNAP_META) -> dict:
+    df = pd.read_csv(csv, index_col=0, parse_dates=True)
+    meta = json.loads(meta_path.read_text())
     idx = pd.DatetimeIndex(df.index)
+    tick = [c for c in df.columns if c not in (RF_EUR_COL, RF_USD_COL, FX_COL)]
     return dict(
         prices_usd=df[tick].set_axis(idx),
-        fx_usd_per_eur=df["FX_USD_PER_EUR"].set_axis(idx),
-        rf={"USD": df["RF_USD"].set_axis(idx), "EUR": df["RF_EUR"].set_axis(idx)},
+        fx_usd_per_eur=df[FX_COL].set_axis(idx),
+        rf={"EUR": df[RF_EUR_COL].set_axis(idx), "USD": df[RF_USD_COL].set_axis(idx)},
         first_daily=meta["first_daily"], sources=meta["sources"], retrieved_at=meta["retrieved_at"],
-        daily_prices=None, origin="snapshot",
+        n_daily_rows=meta.get("n_daily_rows"), origin="snapshot",
     )
 
 

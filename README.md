@@ -9,52 +9,60 @@ Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridol
 ## What it does
 
 The strategy holds five broad asset classes (US equity, developed ex-US equity, US Treasuries 7-10y, US REITs,
-broad commodities) in equal slices. At each month-end an asset stays invested only while its price is above its
-10-month moving average (Faber 2007); otherwise its slice moves to cash at the risk-free rate.
+broad commodities) in equal capital slices. At each month-end an asset stays invested only while its price is above
+its 10-month moving average (Faber 2007); otherwise its slice moves to cash.
 
 In the sidebar you change the assumptions and every number recalculates:
 
 | Assumption | Default (= prospectus) | Range |
 |---|---|---|
-| Moving-average window | 10 months | 3 to 24 |
+| Moving-average window | 10 months | 6 to 12 |
 | Signal delay | 1 month | 1 or 2 |
-| Rebalancing back to target | Monthly | monthly, quarterly, annually, never |
-| Trading cost (one-way) | 10 bps | 0 to 100 bps |
+| Rebalancing back to equal slices | Monthly | monthly, quarterly, annually, never |
+| Trading cost (one-way) | 10 bps (fund level) | 0 to 100 bps (50 = retail stress case) |
 | Base currency | EUR | EUR or USD |
+| Hedge bond slice to EUR | on | on / off (EUR view) |
 | Backtest period | Jan 2007 to Dec 2025 | Jan 2007 to the last complete month |
 | Assets | all five | any two or more |
-| Benchmark for alpha, beta, IR | B1 static 1/n | B1 or B2 (60/40) |
+| Benchmark for alpha, beta, IR | B1 equal weight 1/n | B1 or B2 (60/40) |
 
 The page shows the six measures the brief requires (annualised average return, volatility, Sharpe ratio, alpha,
-information ratio, beta, the latter not annualised) with plain-English explanations, the growth of 1 for the
-strategy and both benchmarks from the same start date, drawdowns, holdings over time, turnover, cost drag,
-breakeven cost and a full metrics table (CSV download).
+information ratio and beta, the latter not annualised) with plain-English explanations; the growth of 1 for the
+strategy and both benchmarks from the same start date; drawdowns; calendar-year returns; holdings over time;
+turnover, cost drag and breakeven costs (on return and on Sharpe); a 10-year Monte Carlo outlook for 10,000 EUR;
+the indicative PRIIPs risk class; a full metrics table with CSV download; and the method.
 
 ## Same calculations as the notebook
 
 `fm_backtest.py` is the **unchanged engine file** of the submitted notebook (the notebook writes it with
-`%%writefile`). The app never re-implements a calculation: `core.py` only maps the sidebar to the engine's
-`CONFIG` and calls `run_backtest`, `metrics_table`, `turnover_stats`, `breakeven_cost` and `cost_sensitivity`.
-The Method tab prints the engine's SHA-256, which the notebook prints too.
+`%%writefile`). The app never re-implements a calculation: `core.py` only maps the sidebar to the engine's `CONFIG`
+and calls engine functions (`run_backtest`, `metrics_table`, `turnover_stats`, `breakeven_cost`,
+`cost_sensitivity`, `annual_returns`, `sri_priips`, `monte_carlo`). The footer and the Method tab print the engine
+version and SHA-256, which the notebook prints too, and the git commit of the running code.
 
 Tests (`pytest -q`):
 
-- `test_engine_identity.py`: app engine is byte-identical to the notebook's engine (file and `%%writefile` cells).
-- `test_consistency_with_notebook.py`: app defaults reproduce the notebook's `results.json`.
+- `test_engine_identity.py`: the app's engine is byte-identical to the engine inside the notebook
+  (`%%writefile` cells of the .ipynb) and to the group's engine file.
+- `test_consistency_with_notebook.py`: the app's defaults reproduce the notebook's `results.json`.
 - `test_app_core.py`: app defaults equal the notebook `CONFIG` exactly; every setting runs; series start at 1.00;
   a benchmark against itself gives beta 1, alpha 0, tracking error 0.
+- `test_app_ui.py`: the real page, driven headlessly: required measures shown, settings keep each other, reset works.
 
-The GitHub Actions workflow runs the tests and a headless start of the app on the pinned `requirements.txt`.
+To point the identity and consistency tests at the notebook, put the notebook folder path in
+`tests/local_notebook_dir.txt` (git-ignored) or set `FM_NOTEBOOK_DIR`, or copy the .ipynb into `notebook/`.
+GitHub Actions runs all tests on the pinned `requirements.txt`.
 
 ## Data
 
 Live, through the engine's own loader (no API keys, no data files needed): Yahoo Finance adjusted closes
-(via `yfinance`, falling back to Yahoo's chart API), FRED key-less CSV for TB3MS, the euro 3-month rate and
-DEXUSEU, and the ECB Data Portal for the newest euro-rate months. Downloads are cached for 6 hours.
+(via `yfinance`, falling back to Yahoo's chart API, same data), the ECB Data Portal for the euro overnight rate
+(EONIA to September 2019, then the euro short-term rate), FRED for the US T-bill rate and the EUR/USD rate. One
+batched download, cached for 12 hours.
 
-Yahoo sometimes rate-limits cloud servers. In that case the app shows a clear notice and falls back to
-`data/snapshot_inputs.csv`, the same monthly inputs downloaded once with the same code
-(`python tools/make_snapshot.py` refreshes it). The sidebar's "Data source" lets you choose it explicitly.
+Yahoo sometimes throttles shared cloud servers. The app then shows "Live data unavailable, showing snapshot as of
+...", never a traceback, and uses `data/snapshot_inputs.csv`: the same monthly inputs, saved with the engine's own
+`snapshot_frame` (`python tools/make_snapshot.py` refreshes it). "Data source" in the sidebar selects it explicitly.
 
 ## Run locally
 
@@ -65,32 +73,40 @@ streamlit run app.py
 
 Python 3.11 to 3.13. Tests: `pip install pytest` then `pytest -q`.
 
-## Deploy on Streamlit Community Cloud (about 5 minutes, one group member)
+## Deploy on Streamlit Community Cloud (one group member, about 5 minutes)
 
-1. The repository must be on GitHub under the deploying member's account (or one they can access).
-2. Go to `https://share.streamlit.io` and sign in with GitHub. Allow access to the repository when asked
-   (for a private repository, tick private repository access).
-3. Click **Create app**, then **"Yup, I have an app"**.
-4. Repository `belschak/fm-2270-backtest-app`, branch `main`, main file path `app.py`.
-5. App URL: choose a short subdomain, e.g. `bp-trend-guarded`.
-6. Open **Advanced settings**, set **Python version 3.13** (cannot be changed later without redeploying).
-   No secrets are needed. Save.
-7. Click **Deploy**. The first build takes a few minutes; then the app downloads the data once (about 15 seconds).
-8. Make the app viewable without login: in the app's **Share** menu choose **"Make this app public"**
-   (apps from private repositories start private; graders must open the link logged out).
-9. Graders also need the source: the group switches this repository to public (Settings, General, Danger Zone,
-   Change visibility) or adds the graders as collaborators.
-10. Put both links (app URL and `https://github.com/belschak/fm-2270-backtest-app`) in the prospectus and the
-    notebook, then check both in a private browser window.
+Before deploying, decide how graders get access (group decision, after sign-off):
 
-Apps on Community Cloud sleep after 12 hours without visitors; a visitor wakes them with one click
-("Yes, get this app back up!"), which takes a minute or two. Opening the app shortly before grading avoids this.
+- **(a) Repository and app public** (cleanest). A group member switches this repository to public
+  (Settings, General, Danger Zone, Change visibility), then deploys; apps from public repositories are public.
+- **(b) Repository private, graders invited on GitHub, app public.** Deploy from the private repository, then in the
+  app's **Share** menu choose **"Make this app public"**.
+
+Keep in mind: an account can have only **one private app** at a time, and a private app can only be opened by
+invited viewers, so graders would need invitations. Choose (a) or (b) so the app itself is public.
+
+Steps:
+
+1. Go to `https://share.streamlit.io` and sign in with GitHub. Allow access to this repository when asked
+   (for a private repository, allow private repository access).
+2. Click **Create app**, then **"Yup, I have an app"**.
+3. Repository `belschak/fm-2270-backtest-app`, branch `main`, main file path `app.py`.
+4. App URL: choose a short subdomain, for example `bp-trend-guarded`.
+5. Open **Advanced settings** and choose **Python 3.13**. The Python version is chosen once: changing it later means
+   deleting and redeploying the app. No secrets are needed. Save.
+6. Click **Deploy**. The first build takes a few minutes; then the app downloads the data once (about 15 seconds).
+7. For option (b): **Share**, then **"Make this app public"**.
+8. Put both links (app URL and `https://github.com/belschak/fm-2270-backtest-app`) in the prospectus and the
+   notebook, fill `NOTEBOOK_URL` in `app.py`, and check both links in a private browser window.
+
+Apps on Community Cloud **sleep after 12 hours without visitors**. A visitor wakes one with the button
+"Yes, get this app back up!", which takes a minute or two. Open the app on the morning of grading.
 
 ## Updating after the notebook changes
 
 ```bash
 python tools/sync_engine.py      # copies the notebook's engine unchanged and prints both SHA-256 hashes
-python tools/make_snapshot.py    # optional: refresh the offline snapshot
+python tools/make_snapshot.py    # refresh the offline snapshot with the same engine
 pytest -q
 ```
 
@@ -108,7 +124,9 @@ pytest -q
 
 ## Use of generative AI
 
-An AI coding assistant (Claude) helped write the app code. The group checked it with the tests above: the engine is
-the notebook's own file, the defaults reproduce the notebook's numbers, and each user setting was exercised.
+An AI assistant (Claude) proposed the strategy and helped write the code of the notebook and this app. The group
+checked the outputs: the app runs the notebook's own engine file (tested byte for byte), its defaults reproduce the
+notebook's results (tested), and every setting was exercised in automated tests and by hand.
 
-Educational project, not investment advice. Past performance does not predict future returns.
+Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
+future returns.

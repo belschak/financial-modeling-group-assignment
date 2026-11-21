@@ -8,16 +8,24 @@
   },
   "sources": {
     "prices": {
-      "SPY": "yahoo_chart_api",
-      "EFA": "yahoo_chart_api",
-      "IEF": "yahoo_chart_api",
-      "VNQ": "yahoo_chart_api",
-      "DBC": "yahoo_chart_api"
+      "SPY": "Yahoo Finance via chart API",
+      "EFA": "Yahoo Finance via chart API",
+      "IEF": "Yahoo Finance via chart API",
+      "VNQ": "Yahoo Finance via chart API",
+      "DBC": "Yahoo Finance via chart API"
     },
-    "rf_USD": "FRED TB3MS",
-    "rf_EUR": "FRED IR3TIB01EZM156N (+ ECB 3m Euribor after 2026-02)",
-    "fx": "FRED DEXUSEU (daily, last obs. of month, USD per EUR)"
+    "rf_EUR": "ECB EONIA to 2019-09, then euro short-term rate (EUR STR); monthly average",
+    "rf_USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
+    "fx": "FRED DEXUSEU (USD per EUR, end of month)"
   },
-  "retrieved_at": "2026-11-20 23:57 UTC",
-  "note": "Monthly inputs as returned by fm_backtest.load_data(); rf already converted to monthly decimals."
+  "retrieved_at": "2026-11-21 00:18 UTC",
+  "n_daily_rows": {
+    "SPY": 8497,
+    "EFA": 6332,
+    "IEF": 6104,
+    "VNQ": 5558,
+    "DBC": 5217
+  },
+  "engine_version": "2.0.0",
+  "note": "fm_backtest.snapshot_frame(load_data(cfg)): month-end USD prices, FX, monthly rf decimals."
 }

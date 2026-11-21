@@ -28,7 +28,7 @@ def test_defaults_page_shows_six_required_measures_and_badge():
     labels = [m.label for m in at.metric]
     for want in ("Average return p.a.", "Volatility p.a.", "Sharpe ratio", "Alpha p.a.", "Information ratio", "Beta"):
         assert any(lbl.startswith(want) for lbl in labels), want
-    assert any("Defaults = prospectus" in m.value for m in at.markdown)
+    assert any("matches prospectus Table 1" in m.value for m in at.markdown)
 
 
 def test_changing_one_assumption_keeps_the_others():
@@ -42,7 +42,7 @@ def test_changing_one_assumption_keeps_the_others():
 def test_cost_slider_changes_numbers_and_reset_restores_defaults():
     at = _app()
     sharpe0 = _card(at, "Sharpe ratio")
-    at.slider(key="cost_bps").set_value(80).run()
+    at.select_slider(key="cost_bps").set_value(75).run()
     assert _card(at, "Sharpe ratio") != sharpe0
     at.button[0].click().run()
     assert not at.exception
@@ -52,6 +52,7 @@ def test_cost_slider_changes_numbers_and_reset_restores_defaults():
 
 def test_too_short_history_gives_a_readable_message():
     at = _app()
-    at.slider(key="sma_months").set_value(24).run()
+    at.slider(key="sma_window").set_value(12).run()
+    at.radio(key="signal_lag").set_value(2).run()
     assert not at.exception
     assert any("Move the start" in e.value for e in at.error)

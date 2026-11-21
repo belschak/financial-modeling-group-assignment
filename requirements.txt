@@ -1,8 +1,8 @@
-# Exact pins: the same pandas/numpy as Google Colab (where the notebook runs) and the notebook's yfinance pin,
-# so app and notebook compute with the same libraries. Streamlit Cloud: choose Python 3.13 in Advanced settings.
-streamlit==1.58.0
+# Exact pins = Google Colab's libraries (where the notebook runs) + the notebook's yfinance pin, so app and
+# notebook compute with the same code paths. Streamlit Cloud: choose Python 3.13 in Advanced settings.
+streamlit==1.67.0
 pandas==2.2.3
 numpy==2.1.3
-plotly==6.7.0
+plotly==5.24.1
 requests==2.32.3
 yfinance==1.8.0
