@@ -148,12 +148,13 @@ def crisis_paths(paths: dict, styles: dict, window: tuple, p: dict) -> go.Figure
 def signal_strip(signals: pd.DataFrame, names: dict, p: dict) -> go.Figure:
     """Which sleeves were invested (1) or in cash (0) in each month: one row per fund."""
     z = signals.T.to_numpy(dtype=float)
-    labels = [f"{t} · {names.get(t, t).split(' (')[0]}" for t in signals.columns]
+    labels = list(signals.columns)  # tickers only, so the strip keeps its width on phones
     fig = go.Figure(go.Heatmap(
         z=z, x=signals.index, y=labels, zmin=0, zmax=1, showscale=False, xgap=2, ygap=3,
         colorscale=[[0, p["cash"]], [0.5, p["cash"]], [0.5, p["strategy"]], [1, p["strategy"]]],
-        customdata=[["invested" if v == 1 else "in cash" for v in row] for row in z],
-        hovertemplate="%{y}<br>%{x|%b %Y}: %{customdata}<extra></extra>"))
+        customdata=[[f"{names.get(t, t).split(' (')[0]}: {'invested' if v == 1 else 'in cash'}" for v in row]
+                    for t, row in zip(labels, z)],
+        hovertemplate="%{y} %{x|%b %Y}<br>%{customdata}<extra></extra>"))
     fig = _layout(fig, p, "", height=60 + 34 * len(labels))
     fig.update_layout(hovermode="closest", showlegend=False, margin=dict(l=8, r=8, t=8, b=8))
     fig.update_yaxes(type="category", showgrid=False, autorange="reversed", title=None, automargin=True)
