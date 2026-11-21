@@ -367,8 +367,8 @@ with t_method:
     cfg = res.cfg
     st.markdown(f"""
 **Data.** Daily adjusted closes (splits and dividends reinvested) from Yahoo Finance for SPY, EFA, IEF, VNQ and DBC,
-reduced to the last close of each month. Risk-free rates: FRED TB3MS (USD) and the euro 3-month rate
-(FRED IR3TIB01EZM156N, latest months from the ECB). EUR/USD: FRED DEXUSEU, last daily value of each month.
+reduced to the last close of each month. Risk-free rates and FX as downloaded for this run: USD rate
+{data['sources']['rf_USD']}; EUR rate {data['sources']['rf_EUR']}; EUR/USD {data['sources']['fx']}.
 US-listed funds stand in for the UCITS funds an EU investor would buy, because their history is longer.
 
 **Rule.** At each month-end an asset is "in" if its USD price is above its simple moving average of the last
