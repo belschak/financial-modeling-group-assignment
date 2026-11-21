@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(not dl.snapshot_available(), reason="no stored s
 def _app():
     from streamlit.testing.v1 import AppTest
     os.chdir(REPO)
-    at = AppTest.from_file("app.py", default_timeout=120)
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=120)
     at.session_state["data_pref"] = "snapshot"
     at.run()
     assert not at.exception, at.exception

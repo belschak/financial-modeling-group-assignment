@@ -19,7 +19,7 @@ jobs:
         run: |
           python - <<'PY'
           from streamlit.testing.v1 import AppTest
-          at = AppTest.from_file("app.py", default_timeout=120)
+          at = AppTest.from_file(str(__import__("pathlib").Path("app.py").resolve()), default_timeout=120)
           at.session_state["data_pref"] = "snapshot"
           at.run()
           assert not at.exception, at.exception
