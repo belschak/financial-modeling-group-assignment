@@ -1523,7 +1523,8 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
                      **({t: [int(x) for x in bt["signals"][t].to_numpy()] for t in bt["signals"].columns}
                         if bt["signals"] is not None else {})),
         tests=tests.to_dict(orient="records"),
-        tests_all_pass=bool((tests["result"] == "PASS").all()),
+        tests_all_pass=bool((tests["result"] != "FAIL").all()),   # SKIPPED = optional library unavailable
+        tests_summary=tests["result"].value_counts().to_dict(),
     )
     if extra:
         out.update(extra)

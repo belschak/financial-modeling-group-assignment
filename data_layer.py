@@ -60,7 +60,8 @@ def load_snapshot(csv: Path = SNAP_CSV, meta_path: Path = SNAP_META) -> dict:
         prices_usd=df[tick].set_axis(idx),
         fx_usd_per_eur=df[FX_COL].set_axis(idx),
         rf={"EUR": df[RF_EUR_COL].set_axis(idx), "USD": df[RF_USD_COL].set_axis(idx)},
-        first_daily=meta["first_daily"], sources=meta["sources"], retrieved_at=meta["retrieved_at"],
+        first_daily=meta.get("first_daily", {t: df[t].first_valid_index().strftime("%Y-%m-%d") for t in tick}),
+        sources=meta["sources"], retrieved_at=meta["retrieved_at"],
         n_daily_rows=meta.get("n_daily_rows"), origin="snapshot",
     )
 

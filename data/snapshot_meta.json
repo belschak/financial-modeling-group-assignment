@@ -1,31 +1,17 @@
 {
-  "first_daily": {
-    "SPY": "1993-01-29",
-    "EFA": "2001-08-27",
-    "IEF": "2002-07-30",
-    "VNQ": "2004-09-29",
-    "DBC": "2006-02-06"
+ "retrieved_at": "2026-11-21 00:26 UTC",
+ "sources": {
+  "prices": {
+   "SPY": "Yahoo Finance via chart API",
+   "EFA": "Yahoo Finance via chart API",
+   "IEF": "Yahoo Finance via chart API",
+   "VNQ": "Yahoo Finance via chart API",
+   "DBC": "Yahoo Finance via chart API"
   },
-  "sources": {
-    "prices": {
-      "SPY": "Yahoo Finance via chart API",
-      "EFA": "Yahoo Finance via chart API",
-      "IEF": "Yahoo Finance via chart API",
-      "VNQ": "Yahoo Finance via chart API",
-      "DBC": "Yahoo Finance via chart API"
-    },
-    "rf_EUR": "ECB EONIA to 2019-09, then euro short-term rate (EUR STR); monthly average",
-    "rf_USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
-    "fx": "FRED DEXUSEU (USD per EUR, end of month)"
-  },
-  "retrieved_at": "2026-11-21 00:18 UTC",
-  "n_daily_rows": {
-    "SPY": 8497,
-    "EFA": 6332,
-    "IEF": 6104,
-    "VNQ": 5558,
-    "DBC": 5217
-  },
-  "engine_version": "2.0.0",
-  "note": "fm_backtest.snapshot_frame(load_data(cfg)): month-end USD prices, FX, monthly rf decimals."
+  "rf_EUR": "ECB EONIA to 2019-09, then euro short-term rate (EUR STR); monthly average",
+  "rf_USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
+  "fx": "FRED DEXUSEU (USD per EUR, end of month)"
+ },
+ "engine_sha256": "cdc778dd6ac0268406f86d8cf4172ddb38058b16c88a1eaad8c2fff0b1ff23c4",
+ "columns": "month-end adjusted close USD per ticker; FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_monthly_shifted (TB3MS, already shifted one month)"
 }
