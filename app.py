@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import io
 import math
+import time
+from contextlib import contextmanager
 
 import pandas as pd
 import streamlit as st
@@ -46,8 +48,9 @@ DISCLAIMER = "Hypothetical back-tested results. Past performance does not predic
 COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 
 
+@st.cache_resource(show_spinner=False)
 def _commit() -> str:
-    """Short git commit of the running code (Streamlit Cloud deploys a git checkout)."""
+    """Short git commit of the running code (Streamlit Cloud deploys a git checkout). Read once per server."""
     import subprocess
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5,
@@ -59,26 +62,29 @@ def _commit() -> str:
 
 COMMIT = _commit()
 REBAL = {"M": "Monthly", "Q": "Quarterly", "A": "Annually", "none": "Never (only on signal switches)"}
+LIVE_RETRY_AFTER_S = 600  # after a failed live download, use the snapshot for 10 minutes before trying again
 
 # ---------------------------------------------------------------- state
 for k, v in core.DEFAULTS.items():
     if k not in ("start", "end"):
         st.session_state.setdefault(k, list(v) if k == "tickers" else v)
 st.session_state.setdefault("data_pref", "live")
+st.session_state.setdefault("period_rev", 0)   # bumped by Reset: gives the period slider a fresh identity
 
 
 def reset_defaults():
     for k, v in core.DEFAULTS.items():
         if k not in ("start", "end"):
             st.session_state[k] = list(v) if k == "tickers" else v
-    st.session_state.pop("period", None)  # the slider falls back to its default range
+    st.session_state.pop(f"period_{st.session_state['period_rev']}", None)
+    st.session_state["period_rev"] += 1
 
 
 # ---------------------------------------------------------------- data + runs (cached)
 @st.cache_data(ttl="12h", show_spinner="Downloading prices (Yahoo Finance) and rates (FRED, ECB)...")
 def live_data(engine_sha: str) -> dict:
     # engine_sha in the cache key: a new engine (new data sources) never reuses an old download.
-    return dl.load_live()  # raises on failure, and failures are never cached
+    return dl.load_live()  # raises on failure, and failures are never cached here
 
 
 @st.cache_data(show_spinner=False)
@@ -86,56 +92,68 @@ def snapshot_data(file_stamp: float) -> dict:
     return dl.load_snapshot()
 
 
+@st.cache_resource(show_spinner=False)
+def _live_failure() -> dict:
+    """Server-wide memory of the last failed live download, so a throttled server is not retried on every click."""
+    return {}
+
+
 def get_data(pref: str) -> tuple[dict, str | None]:
-    """Returns (data, warning). Live first; on failure the stored snapshot, with a visible warning."""
+    """Returns (data, warning). Called ONCE per page run; everything below uses this exact data."""
+    snap_ok = dl.snapshot_available()
     if pref == "snapshot":
+        if not snap_ok:
+            raise RuntimeError("The stored data snapshot is not part of this deployment. Choose live data.")
         return snapshot_data(dl.SNAP_CSV.stat().st_mtime), None
-    try:
-        return live_data(ENGINE_SHA), None
-    except Exception as e:  # noqa: BLE001
-        if dl.snapshot_available():
-            snap = snapshot_data(dl.SNAP_CSV.stat().st_mtime)
-            return snap, (
-                f"Live data unavailable, showing snapshot as of {snap['retrieved_at']}. "
-                f"({type(e).__name__}: Yahoo Finance sometimes throttles shared cloud servers; same sources and "
-                "same code, reload in a few minutes for live data.)")
-        raise
+    fail = _live_failure()
+    recent = fail.get("t") and time.time() - fail["t"] < LIVE_RETRY_AFTER_S
+    if not recent:
+        try:
+            data = live_data(ENGINE_SHA)
+            fail.clear()
+            return data, None
+        except Exception as e:  # noqa: BLE001
+            fail.update(t=time.time(), err=type(e).__name__)
+    if snap_ok:
+        snap = snapshot_data(dl.SNAP_CSV.stat().st_mtime)
+        return snap, (
+            f"Live data unavailable, showing snapshot as of {snap['retrieved_at']}. "
+            f"({fail.get('err', 'download error')}: Yahoo Finance sometimes throttles shared cloud servers; same "
+            "sources and same code. The app tries live data again after a few minutes.)")
+    raise RuntimeError("Market data could not be downloaded right now.")
 
 
+# Cached computations take the page's data as `_data` (not hashed); `data_stamp` identifies it in the cache key,
+# so a result is always computed from exactly the data the page says it shows.
 @st.cache_data(show_spinner="Running the backtest...", max_entries=128)
-def run_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> core.Result:
-    # engine_sha is part of the cache key: a new engine version never reuses old results.
-    data, _ = get_data(pref)
+def run_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> core.Result:
     ui = dict(ui_items)
     ui["tickers"] = list(ui["tickers"])
-    return core.run(ui, data)
+    return core.run(ui, _data)
 
 
 @st.cache_data(show_spinner="Simulating 10,000 ten-year paths...", max_entries=32)
-def mc_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
-    # Cached per settings: the Monte Carlo is not recomputed when nothing it depends on changed.
-    return core.monte_carlo(run_cached(ui_items, pref, data_stamp, engine_sha))
+def mc_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> dict:
+    return core.monte_carlo(run_cached(ui_items, data_stamp, engine_sha, _data))
 
 
 @st.cache_data(show_spinner="Simulating the cautious variant...", max_entries=32)
-def mc_haircut_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
-    return core.monte_carlo_haircut(run_cached(ui_items, pref, data_stamp, engine_sha))
+def mc_haircut_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> dict:
+    return core.monte_carlo_haircut(run_cached(ui_items, data_stamp, engine_sha, _data))
 
 
 @st.cache_data(show_spinner="Running the four window lengths...", max_entries=32)
-def sma_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
-    data, _ = get_data(pref)
+def sma_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> dict:
     ui = dict(ui_items)
     ui["tickers"] = list(ui["tickers"])
-    return core.sma_stability(ui, data)
+    return core.sma_stability(ui, _data)
 
 
 # ---------------------------------------------------------------- load data first (sidebar needs the date range)
 try:
     data, data_warning = get_data(st.session_state["data_pref"])
 except Exception as e:  # noqa: BLE001
-    st.error("Market data could not be downloaded right now and no stored snapshot is available. "
-             f"Please reload in a few minutes. Details: {e}")
+    st.error(f"{e} Please reload in a few minutes.", icon=":material/cloud_off:")
     st.stop()
 last_month = dl.last_complete_month(data, list(core.ASSET_NAMES))
 months = pd.period_range("2007-01", last_month.strftime("%Y-%m"), freq="M").strftime("%Y-%m").tolist()
@@ -174,11 +192,13 @@ with st.sidebar:
                        "as a euro investor would usually hold bonds. Equities, real estate and commodities stay "
                        "unhedged. Applies to the strategy and both benchmarks.")
     # value= makes it a RANGE slider (without it Streamlit treats it as single-value and resets the range).
+    # The key changes on Reset, so the browser shows the default range again (a reused key keeps its old range).
+    PKEY = f"period_{st.session_state['period_rev']}"
     default_period = (core.DEFAULTS["start"], min(core.DEFAULTS["end"], months[-1]))
-    if "period" in st.session_state and any(m not in months for m in st.session_state["period"]):
-        del st.session_state["period"]
-    st.select_slider("Backtest period", options=months, key="period",
-                     value=st.session_state.get("period", default_period),
+    if PKEY in st.session_state and any(m not in months for m in st.session_state[PKEY]):
+        del st.session_state[PKEY]
+    st.select_slider("Backtest period", options=months, key=PKEY,
+                     value=st.session_state.get(PKEY, default_period),
                      help="Earliest start is Jan 2007: the commodity fund (DBC) starts in Feb 2006 and the rule needs "
                           "a full moving-average window first. Jan 2007 is also after the rule was published.")
 
@@ -201,9 +221,17 @@ with st.sidebar:
     st.button("Reset to prospectus defaults", on_click=reset_defaults, width="stretch")
 
 ui = {k: st.session_state[k] for k in core.DEFAULTS if k not in ("start", "end")}
-ui["start"], ui["end"] = st.session_state["period"]
+ui["start"], ui["end"] = st.session_state[PKEY]
 ui["tickers"] = tuple(t for t in core.ASSET_NAMES if t in (st.session_state["tickers"] or []))
 is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
+start_note = None
+if len(ui["tickers"]) >= 2:
+    # A longer average or delay needs more history than the youngest fund has: start later instead of failing.
+    first_ok = core.earliest_start(data, ui["tickers"], ui["sma_window"], ui["signal_lag"])
+    if pd.Timestamp(ui["start"] + "-01") + pd.offsets.MonthEnd(0) < first_ok:
+        start_note = (f"Start moved to {first_ok:%b %Y}: with a {ui['sma_window']}-month average and a "
+                      f"{ui['signal_lag']}-month delay, the youngest fund needs that much history first.")
+        ui["start"] = first_ok.strftime("%Y-%m")
 
 # ---------------------------------------------------------------- header
 st.title(core.STRATEGY)
@@ -223,6 +251,8 @@ data_as_of = (f"Data as of {data['retrieved_at']} ({'live download' if data['ori
               f"latest complete month {last_month:%b %Y}")
 if data_warning:
     st.warning(data_warning, icon=":material/cloud_off:")
+if start_note:
+    st.info(start_note, icon=":material/history:")
 
 if len(ui["tickers"]) < 2:
     st.warning("Select at least two assets in the sidebar.")
@@ -231,9 +261,11 @@ if (pd.Period(ui["end"], "M") - pd.Period(ui["start"], "M")).n < 23:
     st.warning("Choose a backtest period of at least 24 months.")
     st.stop()
 
+UI_ITEMS = tuple(sorted(ui.items()))
+DATA_STAMP = f"{data['origin']}|{data['retrieved_at']}"
+CACHE_ARGS = (UI_ITEMS, DATA_STAMP, ENGINE_SHA, data)
 try:
-    res = run_cached(tuple(sorted(ui.items())), st.session_state["data_pref"],
-                     f"{data['origin']}|{data['retrieved_at']}", ENGINE_SHA)
+    res = run_cached(*CACHE_ARGS)
 except ValueError as e:
     msg = f"The backtest cannot run with these settings: {e}"
     if "not enough" in str(e).lower() and "history" in str(e).lower():
@@ -243,6 +275,10 @@ except ValueError as e:
                f"fund needs history until {earliest:%b %Y} before the first decision. Move the start of the backtest "
                f"period to {earliest:%Y-%m} or later, or shorten the window.")
     st.error(msg, icon=":material/history:")
+    st.stop()
+except Exception as e:  # noqa: BLE001  (never show a traceback)
+    st.error(f"The backtest could not run with these settings ({type(e).__name__}: {e}). Try other settings or "
+             "press Reset.", icon=":material/error:")
     st.stop()
 
 M = res.metrics
@@ -324,13 +360,21 @@ for i, (label, value, delta, unit, dcol, key) in enumerate(cards):
         col.metric(label, value, help=HELP[key])
 
 # ---------------------------------------------------------------- tabs
+@contextmanager
+def guard(view: str):
+    """A failing view shows a short notice instead of a traceback, and the other tabs keep working."""
+    try:
+        yield
+    except Exception as e:  # noqa: BLE001
+        st.info(f"{view} cannot be shown with these settings ({e}). The other tabs are unaffected.",
+                icon=":material/info:")
+
+
 t_perf, t_crisis, t_table, t_hold, t_cost, t_sma, t_mc, t_method = st.tabs(
     ["Performance", "Crisis replay", "All metrics", "Holdings", "Costs", "Window stability", "10-year outlook",
      "Method"])
-CACHE_ARGS = (tuple(sorted(ui.items())), st.session_state["data_pref"], f"{data['origin']}|{data['retrieved_at']}",
-              ENGINE_SHA)
 
-with t_perf:
+with t_perf, guard("This view"):
     c1, c2 = st.columns(2)
     log = c1.toggle("Log scale", value=False, help="Equal distances on the axis = equal percentage changes.")
     show_gross = c2.toggle("Show strategy before costs", value=False)
@@ -373,7 +417,7 @@ ROWS = [
     ("hit_rate_vs_benchmark", f"Share of months beating {bn}", lambda x: pct(x, 0), False),
     ("sortino", "Sortino ratio", num, False),
 ]
-with t_table:
+with t_table, guard("The metrics table"):
     st.caption(DISCLAIMER)
     cols = [S, f"{S} (before costs)", core.BENCH_B1, core.BENCH_B2]
     table = pd.DataFrame({c: [f(M.loc[k, c]) if k in M.index else "n/a" for k, _, f, _ in ROWS] for c in cols},
@@ -393,7 +437,7 @@ with t_table:
                        "text/csv", width="stretch")
     d2.download_button("Download metrics (CSV)", M.to_csv(), "bp_backtest_metrics.csv", "text/csv", width="stretch")
 
-with t_hold:
+with t_hold, guard("The holdings view"):
     cash = res.held[core.CASH]
     st.caption(DISCLAIMER)
     st.markdown(f"##### On average {1 - cash.mean():.0%} invested and {cash.mean():.0%} in cash")
@@ -402,7 +446,7 @@ with t_hold:
     st.caption("Weights held during each month, after trading at its start. A slice moves fully to cash when its fund "
                "closes a month below its moving average, and back when it recovers.")
 
-with t_cost:
+with t_cost, guard("The cost view"):
     st.caption(DISCLAIMER)
     tv = res.turnover
 
@@ -433,10 +477,11 @@ with t_cost:
                     config={"displayModeBar": False})
     ahead = M.loc["cagr", S] > M.loc["cagr", P]
     st.caption(f"At {ui['cost_bps']} bps the strategy grows {'faster' if ahead else 'more slowly'} than {bn} "
-               f"({pct(M.loc['cagr', S])} vs {pct(M.loc['cagr', P])} a year). Risk-adjusted (Sharpe) it stays ahead "
-               f"up to {t4} per trade.")
+               f"({pct(M.loc['cagr', S])} vs {pct(M.loc['cagr', P])} a year). " + (
+               f"Risk-adjusted (Sharpe) it stays ahead up to {t4} per trade." if res.breakeven_sharpe_bps
+               else "Risk-adjusted (Sharpe) it is behind even before costs."))
 
-with t_crisis:
+with t_crisis, guard("The crisis replay"):
     st.caption("How the strategy behaved in the big sell-offs of the sample, next to both benchmarks, and when each "
                "slice moved to cash. " + DISCLAIMER)
     in_sample = [c for c in core.CRISES if core.crisis_view(res, c[0], c[1])["in_sample"]]
@@ -466,7 +511,7 @@ with t_crisis:
         st.caption("Paths start at 1.00 three months before the window (or at the start of your sample) so you see the "
                    "run-up. Signals use month-end prices and are acted on with your signal delay.")
 
-with t_sma:
+with t_sma, guard("The window comparison"):
     stab = sma_cached(*CACHE_ARGS)
     st.markdown("##### Does the result depend on the 10-month window?")
     st.caption("The 10-month window comes from Faber (2007) and was fixed before looking at our results. This view "
@@ -490,7 +535,7 @@ with t_sma:
                f"drawdown of any window is {pct(worst_dd)}, against {pct(bench_dd)} for {bn} on the same sample. "
                "The window you chose in the sidebar does not change this table.")
 
-with t_mc:
+with t_mc, guard("The 10-year outlook"):
     haircut = st.toggle("Cautious variant: halve the historical excess return", value=False,
                         help="Published rules often work less well after publication (McLean and Pontiff 2016). "
                              "This variant cuts each portfolio's average return above cash in half before "
@@ -529,7 +574,7 @@ with t_mc:
                    f"paths. Bands: dark = middle 50% of paths, light = {lo_n}th to {hi_n}th percentile. "
                    f"Values in {ccy}, after the trading costs you chose.")
 
-with t_method:
+with t_method, guard("The method note"):
     cfg = res.cfg
     st.markdown(f"""
 **Data.** Daily adjusted closes (splits and dividends reinvested) from Yahoo Finance for SPY, EFA, IEF, VNQ and DBC,

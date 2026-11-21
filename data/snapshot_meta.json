@@ -1,5 +1,5 @@
 {
- "retrieved_at": "2026-11-21 00:26 UTC",
+ "retrieved_at": "2026-11-21 00:46 UTC",
  "sources": {
   "prices": {
    "SPY": "Yahoo Finance via chart API",
@@ -12,6 +12,6 @@
   "rf_USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
   "fx": "FRED DEXUSEU (USD per EUR, end of month)"
  },
- "engine_sha256": "cdc778dd6ac0268406f86d8cf4172ddb38058b16c88a1eaad8c2fff0b1ff23c4",
+ "engine_sha256": "dcf0731d0eeee65e353dd984614dcddb074a7feed448da5133b2280cec58dd38",
  "columns": "month-end adjusted close USD per ticker; FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_monthly_shifted (TB3MS, already shifted one month)"
 }

@@ -77,6 +77,11 @@ DEFAULT_CONFIG = dict(
         ["2020-02-01", "2020-03-31", "Covid crash"],
         ["2022-01-01", "2022-12-31", "2022 inflation shock"],
     ],
+    split_periods=[["2007-01-01", "2015-12-31", "First half 2007-15"],
+                   ["2016-01-01", "2025-12-31", "Second half 2016-25"]],
+    timing_anchor_days=[8, 10, 12, 15, 17, 19, 22, 24, 26, 28],   # rebalance-timing luck: signal and trades on these days instead of month-end
+    cost_bps_by_asset={"SPY": 2.0, "EFA": 2.0, "IEF": 2.0, "VNQ": 10.0, "DBC": 10.0},  # spread-based alternative
+    sharpe_ci_draws=5000,
     sma_stability=[6, 8, 10, 12],
     sma_stability_start="2007-02-01",  # common sample: the 12-month average needs one more month of DBC
     rolling_window=36,
@@ -299,11 +304,16 @@ def load_data(cfg: dict) -> dict:
         fx = fetch_ecb("EXR/D.USD.EUR.SP00.A").resample(ME).last()
         fx_src = "ECB EXR D.USD.EUR.SP00.A (USD per EUR, last daily fixing of the month)"
     fx.index = _to_month_end_index(fx.index)
+    try:  # daily FX only feeds the rebalance-timing robustness check; the base case never needs it
+        fx_daily = fetch_fred(cfg["fx_series"])
+    except RuntimeError:
+        fx_daily = None
     sources = {"prices": used, "rf_EUR": cfg["rf_sources"]["EUR"], "rf_USD": cfg["rf_sources"]["USD"],
                "fx": fx_src}
     return dict(prices_usd=px_m, fx_usd_per_eur=fx, rf={"EUR": rf_eur, "USD": rf_usd}, first_daily=first_daily,
                 n_daily_rows={t: int(px_d[t].notna().sum()) for t in tickers}, sources=sources,
-                retrieved_at=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M UTC"))
+                retrieved_at=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M UTC"),
+                daily_prices=px_d, fx_daily=fx_daily)
 
 
 def synthetic_data(cfg: dict | None = None, seed: int = 7, start: str = "2000-01-31",
@@ -956,6 +966,90 @@ def monte_carlo(cfg: dict, bt: dict, against: str | None = None) -> dict:
     return base
 
 
+def anchored_data(data: dict, day: int) -> dict:
+    """Same inputs, but each 'month' is measured from day `day` to day `day` (last close on or before that day).
+    Labels stay month-end so the whole engine runs unchanged. Rates stay monthly (half-month misalignment,
+    immaterial for a robustness check). Needs the daily data kept by load_data()."""
+    px_d, fx_d = data.get("daily_prices"), data.get("fx_daily")
+    if px_d is None or fx_d is None:
+        raise ValueError("daily data not available (e.g. app snapshot)")
+
+    def pick(df):
+        df = df[df.index.day <= day]
+        out = df.groupby([df.index.year, df.index.month]).last()
+        out.index = _to_month_end_index([pd.Timestamp(y, m, 1) for y, m in out.index])
+        return out
+    px = pick(px_d)
+    fx = pick(fx_d.to_frame()).iloc[:, 0].reindex(px.index).ffill()
+    return {**data, "prices_usd": px, "fx_usd_per_eur": fx}
+
+
+def net_with_asset_costs(sim: SimResult, cost_by_asset: dict, default_bps: float) -> pd.Series:
+    """Net returns when each ETF has its own one-way cost (spreads differ: equity ETFs tight, REIT/commodity wider)."""
+    c = pd.Series({col: cost_by_asset.get(col, default_bps) for col in sim.held.columns if col != CASH}) / 1e4
+    dw = (sim.held - sim.drift).abs()[c.index]
+    cost = dw.mul(c, axis=1).sum(axis=1)
+    return (1.0 - cost) * (1.0 + sim.gross) - 1.0
+
+
+def sharpe_diff_ci(r: pd.Series, rb: pd.Series, rf: pd.Series, draws: int = 5000, block: int = 12,
+                   seed: int = 2270) -> dict:
+    """Is the Sharpe advantage over the benchmark more than luck? Circular block bootstrap of the joint
+    monthly history (strategy, benchmark, cash) and the 95% interval of the Sharpe difference."""
+    rng = np.random.default_rng(seed)
+    X = pd.concat([r - rf, rb - rf], axis=1).dropna().to_numpy()
+    T = len(X); nb = int(math.ceil(T / block))
+    starts = rng.integers(0, T, size=(draws, nb))
+    idx = ((starts[:, :, None] + np.arange(block)[None, None, :]) % T).reshape(draws, -1)[:, :T]
+    s = X[idx]                                           # (draws, T, 2)
+    sr = math.sqrt(PERIODS) * s.mean(axis=1) / s.std(axis=1, ddof=1)
+    d = sr[:, 0] - sr[:, 1]
+    point = math.sqrt(PERIODS) * (X.mean(0) / X.std(0, ddof=1))
+    return dict(sharpe=float(point[0]), sharpe_benchmark=float(point[1]), diff=float(point[0] - point[1]),
+                ci_low=float(np.percentile(d, 2.5)), ci_high=float(np.percentile(d, 97.5)),
+                share_positive=float((d > 0).mean()), draws=draws, block=block)
+
+
+def extra_robustness(cfg: dict, data: dict, bt: dict) -> dict:
+    """Level-2 checks: first vs second half, rebalance-timing luck, per-asset costs, Sharpe-difference CI."""
+    rf = bt["rf"]; prim = bt["primary"]; pb = bt["benchmarks"][prim]
+    out = {}
+    rows = []
+    for s0, s1, label in cfg["split_periods"]:
+        ix = window_index(bt["index"], s0, s1)
+        for name, ser in [("Strategy", bt["strategy"].net)] + [(v.name, v.net) for v in bt["benchmarks"].values()]:
+            rows.append(dict(period=label, portfolio=name,
+                             **_summary_row(ser.loc[ix], pb.net.loc[ix] if name == "Strategy" else None, rf.loc[ix])))
+    out["split_halves"] = pd.DataFrame(rows)
+    rows = []
+    base = dict(anchor="month-end (base case)", **_summary_row(bt["strategy"].net, pb.net, rf),
+                benchmark_cagr=perf_metrics(pb.net, None, rf)["cagr"], benchmark_sharpe=perf_metrics(pb.net, None, rf)["sharpe"])
+    rows.append(base)
+    for day in cfg["timing_anchor_days"]:
+        try:
+            b2 = run_backtest(cfg, anchored_data(data, day))
+        except ValueError:
+            continue
+        p2 = b2["benchmarks"][prim]
+        rows.append(dict(anchor=f"day {day} of each month", **_summary_row(b2["strategy"].net, p2.net, b2["rf"]),
+                         benchmark_cagr=perf_metrics(p2.net, None, b2["rf"])["cagr"],
+                         benchmark_sharpe=perf_metrics(p2.net, None, b2["rf"])["sharpe"]))
+    out["timing_luck"] = pd.DataFrame(rows).set_index("anchor")
+    rows = []
+    cba = cfg["cost_bps_by_asset"]
+    for name, sim in [("Strategy", bt["strategy"])] + [(v.name, v) for v in bt["benchmarks"].values()]:
+        flat = sim.net
+        spread = net_with_asset_costs(sim, cba, cfg["cost_bps"])
+        rows.append(dict(portfolio=name, cagr_flat=perf_metrics(flat, None, rf)["cagr"],
+                         cagr_by_asset=perf_metrics(spread, None, rf)["cagr"],
+                         sharpe_flat=perf_metrics(flat, None, rf)["sharpe"],
+                         sharpe_by_asset=perf_metrics(spread, None, rf)["sharpe"]))
+    out["cost_by_asset"] = pd.DataFrame(rows).set_index("portfolio")
+    out["sharpe_diff_ci"] = sharpe_diff_ci(bt["strategy"].net, pb.net, rf, cfg["sharpe_ci_draws"], cfg["mc_block"],
+                                           cfg["mc_seed"])
+    return out
+
+
 # %% [engine 7/8] figures (matplotlib, shared design tokens)
 STYLE = dict(ink="#14213D", navy="#1F4E79", navy_light="#DCE6F0", ochre="#C08A2B", slate="#8A94A6",
              cash="#9DB7D5", loss="#A23B3B", grid="#E6E9EF", paper="#FFFFFF")
@@ -1405,7 +1499,7 @@ def self_tests(cfg: dict, data: dict, bt: dict | None = None) -> pd.DataFrame:
 
 
 def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: pd.DataFrame,
-                  extra: dict | None = None) -> dict:
+                  extra: dict | None = None, extra_rob: dict | None = None) -> dict:
     """Everything the prospectus prints, in one JSON-able dictionary (schema: RESULTS-SCHEMA.md)."""
     import platform
     prim = bt["primary"]
@@ -1504,7 +1598,11 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
                         currency=rob["currency"].to_dict(orient="records"),
                         sma_stability=rob.get("sma_stability", pd.DataFrame()),
                         signal_currency=rob.get("signal_currency", pd.DataFrame()),
-                        events_2020=rob.get("events_2020", [])),
+                        events_2020=rob.get("events_2020", []),
+                        extra=({"split_halves": extra_rob["split_halves"].to_dict(orient="records"),
+                                "timing_luck": extra_rob["timing_luck"],
+                                "cost_by_asset": extra_rob["cost_by_asset"],
+                                "sharpe_diff_ci": extra_rob["sharpe_diff_ci"]} if extra_rob else {})),
         rolling=dict(window=cfg["rolling_window"], sharpe_min=rs["rolling_sharpe"].min(),
                      sharpe_max=rs["rolling_sharpe"].max(), sharpe_last=rs["rolling_sharpe"].iloc[-1],
                      beta_min=rs["rolling_beta"].min(), beta_max=rs["rolling_beta"].max(),

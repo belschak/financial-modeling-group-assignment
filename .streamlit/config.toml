@@ -35,3 +35,7 @@ runOnSave = false
 
 [browser]
 gatherUsageStats = false
+
+[client]
+# Last line of defence: if anything ever escapes the app's own error handling, show only the error type.
+showErrorDetails = "type"
