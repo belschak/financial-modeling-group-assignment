@@ -41,10 +41,14 @@ def load_live(end: str | None = None) -> dict:
 
 
 RF_EUR_COL, RF_USD_COL, FX_COL = "RF_EUR_monthly", "RF_USD_monthly_shifted", "FX_USDperEUR"
+RF_HEDGE_COL = "RF_USD_overnight_monthly"       # US overnight rate for the bond hedge (engine >= frozen v2)
+NON_TICKER = (RF_EUR_COL, RF_USD_COL, FX_COL, RF_HEDGE_COL)
+SNAP_DAILY = DATA_DIR / "snapshot_daily.csv"     # daily closes + daily FX: only for the daily SRI / timing checks
 
 
-def save_snapshot(data: dict) -> None:
-    """Store the engine's own snapshot table (fm_backtest.snapshot_frame) plus provenance."""
+def save_snapshot(data: dict, daily: bool = True) -> None:
+    """Store the engine's own snapshot table (fm_backtest.snapshot_frame) plus provenance; optionally the daily
+    prices and FX the engine keeps for the daily risk class and the timing checks."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     df = fb.snapshot_frame(data)
     df.index.name = "month_end"
@@ -53,21 +57,38 @@ def save_snapshot(data: dict) -> None:
                 n_daily_rows=data.get("n_daily_rows"), engine_version=fb.ENGINE_VERSION,
                 note="fm_backtest.snapshot_frame(load_data(cfg)): month-end USD prices, FX, monthly rf decimals.")
     SNAP_META.write_text(json.dumps(meta, indent=2))
+    if daily:
+        save_daily(data)
 
 
-def load_snapshot(csv: Path = SNAP_CSV, meta_path: Path = SNAP_META) -> dict:
+def save_daily(data: dict) -> None:
+    if data.get("daily_prices") is None or data.get("fx_daily") is None:
+        return
+    d = data["daily_prices"].copy()
+    d["FX_USDperEUR_daily"] = data["fx_daily"].reindex(d.index)
+    d.index.name = "date"
+    d.to_csv(SNAP_DAILY, float_format="%.8g")
+
+
+def load_snapshot(csv: Path = SNAP_CSV, meta_path: Path = SNAP_META, daily_csv: Path | None = SNAP_DAILY) -> dict:
     df = pd.read_csv(csv, index_col=0, parse_dates=True)
     meta = json.loads(meta_path.read_text())
     idx = pd.DatetimeIndex(df.index)
-    tick = [c for c in df.columns if c not in (RF_EUR_COL, RF_USD_COL, FX_COL)]
-    return dict(
+    tick = [c for c in df.columns if c not in NON_TICKER]
+    data = dict(
         prices_usd=df[tick].set_axis(idx),
         fx_usd_per_eur=df[FX_COL].set_axis(idx),
         rf={"EUR": df[RF_EUR_COL].set_axis(idx), "USD": df[RF_USD_COL].set_axis(idx)},
+        rf_hedge_usd=df[RF_HEDGE_COL].set_axis(idx) if RF_HEDGE_COL in df else None,
         first_daily=meta.get("first_daily", {t: df[t].first_valid_index().strftime("%Y-%m-%d") for t in tick}),
         sources=meta["sources"], retrieved_at=meta["retrieved_at"],
-        n_daily_rows=meta.get("n_daily_rows"), origin="snapshot",
+        n_daily_rows=meta.get("n_daily_rows"), origin="snapshot", daily_prices=None, fx_daily=None,
     )
+    if daily_csv is not None and Path(daily_csv).exists():
+        d = pd.read_csv(daily_csv, index_col=0, parse_dates=True)
+        data["daily_prices"] = d[[c for c in d.columns if c in tick]]
+        data["fx_daily"] = d["FX_USDperEUR_daily"].dropna()
+    return data
 
 
 def snapshot_available() -> bool:

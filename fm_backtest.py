@@ -60,7 +60,8 @@ DEFAULT_CONFIG = dict(
     base_ccy="EUR",          # "EUR" (USD assets converted unhedged, bonds hedged) | "USD"
     hedge_tickers=["IEF"],   # bond sleeve EUR-hedged in the EUR view: r_USD + (rf_EUR - rf_USD)
     rf_sources={"EUR": "ECB EONIA to 2019-09, then euro short-term rate (EUR STR); monthly average",
-                "USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)"},
+                "USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
+                "USD_hedge": "FRED EFFR, US overnight rate, monthly average, no shift (bond hedge carry)"},
     fx_series="DEXUSEU",     # FRED, USD per EUR, end of month
     cost_bps=10.0,           # one-way, bps of traded value (fund-level base case)
     cost_grid=[0, 10, 25, 50],   # 50 bps = the lecture's conservative retail all-in figure
@@ -277,7 +278,9 @@ def load_data(cfg: dict) -> dict:
     tickers = list(dict.fromkeys(list(cfg["tickers"]) + [cfg["market_ticker"]] +
                                  [t for k in cfg["benchmarks"] for t in benchmark_weights(cfg, k)]))
     end = cfg["end"]
-    px_d, used = fetch_prices_daily(tickers, cfg["history_start"], end, cfg.get("price_source", "auto"))
+    # A few days past END so the "trade at the next day's close" check has its last trade; monthly data stop at END.
+    end_dl = (pd.Timestamp(end) + pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+    px_d, used = fetch_prices_daily(tickers, cfg["history_start"], end_dl, cfg.get("price_source", "auto"))
     for t in tickers:  # yfinance can fail silently: assert every series really arrived and is long enough
         s = px_d[t].dropna()
         if s.empty:
@@ -297,6 +300,15 @@ def load_data(cfg: dict) -> dict:
     tb3 = fetch_fred("TB3MS")
     tb3.index = _to_month_end_index(tb3.index)
     rf_usd = annual_pct_to_monthly(tb3).shift(1)               # 3m yield set at the start of the month
+    try:  # bond hedge carry: overnight vs overnight (EUR STR/EONIA vs EFFR), realised monthly averages, no shift
+        effr = fetch_fred("EFFR")
+        effr_m = effr.resample(ME).mean()
+        effr_m.index = _to_month_end_index(effr_m.index)
+        rf_hedge_usd = annual_pct_to_monthly(effr_m)
+        hedge_src = cfg["rf_sources"]["USD_hedge"]
+    except RuntimeError:
+        rf_hedge_usd = None
+        hedge_src = "FRED TB3MS shifted one month (approximation; EFFR unavailable)"
     try:
         fx = fetch_fred(cfg["fx_series"], fq="Monthly", fam="eop")
         fx_src = f"FRED {cfg['fx_series']} (USD per EUR, end of month)"
@@ -304,13 +316,15 @@ def load_data(cfg: dict) -> dict:
         fx = fetch_ecb("EXR/D.USD.EUR.SP00.A").resample(ME).last()
         fx_src = "ECB EXR D.USD.EUR.SP00.A (USD per EUR, last daily fixing of the month)"
     fx.index = _to_month_end_index(fx.index)
+    fx = fx.groupby(level=0).last()  # one value per month even if the API returned daily rows
     try:  # daily FX only feeds the rebalance-timing robustness check; the base case never needs it
         fx_daily = fetch_fred(cfg["fx_series"])
     except RuntimeError:
         fx_daily = None
     sources = {"prices": used, "rf_EUR": cfg["rf_sources"]["EUR"], "rf_USD": cfg["rf_sources"]["USD"],
-               "fx": fx_src}
-    return dict(prices_usd=px_m, fx_usd_per_eur=fx, rf={"EUR": rf_eur, "USD": rf_usd}, first_daily=first_daily,
+               "fx": fx_src, "rf_USD_hedge": hedge_src}
+    return dict(prices_usd=px_m, fx_usd_per_eur=fx, rf={"EUR": rf_eur, "USD": rf_usd}, rf_hedge_usd=rf_hedge_usd,
+                first_daily=first_daily,
                 n_daily_rows={t: int(px_d[t].notna().sum()) for t in tickers}, sources=sources,
                 retrieved_at=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M UTC"),
                 daily_prices=px_d, fx_daily=fx_daily)
@@ -340,6 +354,8 @@ def snapshot_frame(data: dict) -> pd.DataFrame:
     df["FX_USDperEUR"] = data["fx_usd_per_eur"].reindex(df.index)
     df["RF_EUR_monthly"] = data["rf"]["EUR"].reindex(df.index)
     df["RF_USD_monthly_shifted"] = data["rf"]["USD"].reindex(df.index)
+    if data.get("rf_hedge_usd") is not None:
+        df["RF_USD_overnight_monthly"] = data["rf_hedge_usd"].reindex(df.index)
     return df
 
 
@@ -360,7 +376,8 @@ def asset_returns(data: dict, cfg: dict, ccy: str | None = None) -> pd.DataFrame
     r = base_ccy_prices(data, ccy).pct_change(fill_method=None)  # never invent a return across a gap
     if ccy == "EUR":
         # Hedged bond sleeve (covered-interest-parity approximation): USD return plus the rate differential.
-        diff = data["rf"]["EUR"].reindex(r.index) - data["rf"]["USD"].reindex(r.index)
+        usd_leg = data["rf_hedge_usd"] if data.get("rf_hedge_usd") is not None else data["rf"]["USD"]
+        diff = data["rf"]["EUR"].reindex(r.index) - usd_leg.reindex(r.index)
         for t in cfg.get("hedge_tickers") or []:
             r[t] = data["prices_usd"][t].pct_change(fill_method=None) + diff
     r[CASH] = data["rf"][ccy].reindex(r.index)
@@ -428,7 +445,16 @@ def sma_signal(prices: pd.DataFrame, months: int) -> pd.DataFrame:
 def held_signals(cfg: dict, data: dict, index: pd.DatetimeIndex) -> pd.DataFrame:
     """Signal used during each holding month t: computed at month-end t - signal_lag (the lecture's shift)."""
     tick = list(cfg["tickers"])
-    px = data["prices_usd"][tick] if cfg.get("signal_on", "USD") == "USD" else base_ccy_prices(data, cfg["base_ccy"])[tick]
+    if cfg.get("signal_on", "USD") == "USD":
+        px = data.get("signal_prices_usd", data["prices_usd"])[tick]
+    else:
+        px = base_ccy_prices(data, cfg["base_ccy"])[tick].copy()
+        if cfg["base_ccy"] == "EUR":
+            # A hedged sleeve's signal follows the hedged index the fund actually holds, not the unhedged EUR price.
+            r = asset_returns(data, cfg)
+            for t in [h for h in (cfg.get("hedge_tickers") or []) if h in tick]:
+                first = data["prices_usd"][t].first_valid_index()
+                px[t] = (1 + r[t].loc[first:].fillna(0.0)).cumprod().reindex(px.index)
     sig = sma_signal(px, int(cfg["sma_window"])).shift(int(cfg["signal_lag"])).reindex(index)
     if sig.isna().any().any():
         bad = sig.index[sig.isna().any(axis=1)][0]
@@ -720,7 +746,8 @@ def perf_metrics(r: pd.Series, rb: pd.Series | None, rf: pd.Series) -> dict:
 
 
 def turnover_stats(sim: SimResult) -> dict:
-    """Turnover p.a. = 1/2 sum|dw| incl. cash (one-way, comparable to Faber's ~70%); costs on ETF trades."""
+    """Turnover p.a. = 1/2 sum|dw| incl. cash (one-way; each sleeve switch counts as a 20% trade, so this is
+    higher than Faber's ~70%, which counts differently); costs are charged on ETF trades only (cash leg free)."""
     years = len(sim.net) / PERIODS
     cagr_g = float((1 + sim.gross).prod() ** (1 / years) - 1)
     cagr_n = float((1 + sim.net).prod() ** (1 / years) - 1)
@@ -837,6 +864,104 @@ def _summary_row(sim_net, bench_net, rf):
     return {k: m.get(k, np.nan) for k in keys}
 
 
+def earliest_start(cfg: dict, data: dict, window: int | None = None) -> pd.Timestamp:
+    """First holding month for which every ticker has `window` month-ends of history, given the signal lag."""
+    window = int(window or cfg["sma_window"])
+    px = data["prices_usd"][list(cfg["tickers"])]
+    ok = px.rolling(window, min_periods=window).mean().notna().all(axis=1).shift(int(cfg["signal_lag"]))
+    ok = ok.astype("boolean").fillna(False).astype(bool)
+    return ok[ok].index[0]
+
+
+def next_day_data(data: dict) -> dict:
+    """Execution one trading day later: the signal still uses month-end closes, but trades happen at the close
+    of the next trading day, so each month's return runs from the first trading day of the month to the first
+    trading day of the next. Needs the daily data kept by load_data()."""
+    px_d, fx_d = data.get("daily_prices"), data.get("fx_daily")
+    if px_d is None or fx_d is None:
+        raise ValueError("daily data not available (e.g. app snapshot)")
+
+    def first_of_next(df):
+        out = df.groupby([df.index.year, df.index.month]).first()          # first trading day of each month
+        out.index = _to_month_end_index([pd.Timestamp(y, m, 1) for y, m in out.index])
+        return out.shift(-1)                                               # labelled with the previous month-end
+    px = first_of_next(px_d).reindex(data["prices_usd"].index)
+    fx = first_of_next(fx_d.ffill().to_frame()).iloc[:, 0].reindex(px.index)
+    return {**data, "prices_usd": px, "fx_usd_per_eur": fx, "signal_prices_usd": data["prices_usd"]}
+
+
+def daily_portfolio_returns(sim: SimResult, data: dict, cfg: dict, months: int = 60) -> pd.Series:
+    """Daily returns of a simulated portfolio over its last `months` months: each month starts from the weights
+    the monthly simulation held, which then drift daily with the assets (no trades inside the month). EUR view:
+    USD prices divided by the daily EUR/USD rate; hedged sleeves earn the USD price move plus the monthly rate
+    differential spread over the month's trading days; cash accrues the monthly rate evenly."""
+    px_d, fx_d = data.get("daily_prices"), data.get("fx_daily")
+    if px_d is None or fx_d is None:
+        raise ValueError("daily data not available")
+    cols = [c for c in sim.held.columns if c != CASH]
+    ccy = cfg["base_ccy"]
+    px = px_d[cols].ffill()
+    fx = fx_d.reindex(px.index).ffill()
+    lvl = px.div(fx, axis=0) if ccy == "EUR" else px.copy()
+    hedged = [h for h in (cfg.get("hedge_tickers") or []) if h in cols] if ccy == "EUR" else []
+    for h in hedged:
+        lvl[h] = px[h]
+    r_d = lvl.pct_change(fill_method=None)
+    usd_leg = data["rf_hedge_usd"] if data.get("rf_hedge_usd") is not None else data["rf"]["USD"]
+    out = []
+    for m in sim.held.index[-months:]:
+        days = r_d.index[(r_d.index > m - pd.offsets.MonthEnd(1)) & (r_d.index <= m)]
+        if len(days) == 0:
+            continue
+        n = len(days)
+        rm = r_d.loc[days, cols].fillna(0.0).copy()
+        for h in hedged:
+            rm[h] = rm[h] + (float(data["rf"]["EUR"].get(m, 0.0)) - float(usd_leg.get(m, 0.0))) / n
+        cash_r = (1 + float(data["rf"][ccy].get(m, 0.0))) ** (1 / n) - 1
+        w = sim.held.loc[m]
+        vals = np.column_stack([w[cols].to_numpy() * np.cumprod(1 + rm.to_numpy(), axis=0).T.T,
+                                float(w[CASH]) * (1 + cash_r) ** np.arange(1, n + 1)])
+        total = np.concatenate([[1.0], vals.sum(axis=1)])
+        out.append(pd.Series(total[1:] / total[:-1] - 1, index=days))
+    return pd.concat(out)
+
+
+def sri_priips_daily(r_daily: pd.Series, rhp_years: int = 10) -> dict:
+    """Indicative PRIIPs market-risk class from daily returns (Annex II): Cornish-Fisher VaR 97.5% over the
+    holding period, VEV, MRM bands. Daily prices exist, so no extra class (point 15 applies to monthly data only).
+    Trading days per year are taken from the data (about 252)."""
+    x = np.log1p(r_daily.dropna().to_numpy(dtype=float))
+    years = (r_daily.index[-1] - r_daily.index[0]).days / 365.25
+    per_year = len(x) / years
+    m1 = x.mean(); c = x - m1
+    m2, m3, m4 = (c ** 2).mean(), (c ** 3).mean(), (c ** 4).mean()
+    sigma = math.sqrt(m2); skew = m3 / sigma ** 3; exkurt = m4 / sigma ** 4 - 3.0
+    N = per_year * rhp_years
+    var_ret = sigma * math.sqrt(N) * (-1.96 + 0.474 * skew / math.sqrt(N) - 0.0687 * exkurt / N
+                                      + 0.146 * skew ** 2 / N) - 0.5 * sigma ** 2 * N
+    vev = (math.sqrt(3.842 - 2.0 * var_ret) - 1.96) / math.sqrt(rhp_years)
+    mrm = next((i for i, b in enumerate([0.005, 0.05, 0.12, 0.20, 0.30, 0.80], start=1) if vev < b), 7)
+    return dict(vev=float(vev), mrm_class=int(mrm), sri_class=int(mrm), skew=float(skew), excess_kurtosis=float(exkurt),
+                days=int(len(x)), trading_days_per_year=float(per_year), first_day=r_daily.index[0].strftime("%Y-%m-%d"),
+                last_day=r_daily.index[-1].strftime("%Y-%m-%d"), rhp_years=rhp_years)
+
+
+def risk_indicator(cfg: dict, data: dict, bt: dict) -> dict:
+    """Final indicative SRI: daily method if daily data exist (strategy and unfiltered 1/n mix, the higher one),
+    monthly method (+1 class) as cross-check and as fallback."""
+    prim = bt["benchmarks"][bt["primary"]]
+    monthly = dict(strategy=sri_priips(bt["strategy"].net, cfg["sri_rhp_years"]),
+                   unfiltered_reference_mix=sri_priips(prim.net, cfg["sri_rhp_years"]))
+    monthly["sri"] = max(monthly["strategy"]["sri_class"], monthly["unfiltered_reference_mix"]["sri_class"])
+    try:
+        d = dict(strategy=sri_priips_daily(daily_portfolio_returns(bt["strategy"], data, cfg), cfg["sri_rhp_years"]),
+                 unfiltered_reference_mix=sri_priips_daily(daily_portfolio_returns(prim, data, cfg), cfg["sri_rhp_years"]))
+        d["sri"] = max(d["strategy"]["sri_class"], d["unfiltered_reference_mix"]["sri_class"])
+        return dict(sri=d["sri"], method="daily", daily=d, monthly_cross_check=monthly)
+    except ValueError:
+        return dict(sri=monthly["sri"], method="monthly (+1 class, no daily data)", daily=None, monthly_cross_check=monthly)
+
+
 def robustness(cfg: dict, data: dict, bt: dict | None = None) -> dict:
     """Does the conclusion survive other reasonable choices? Each block changes ONE assumption."""
     bt = bt or run_backtest(cfg, data)
@@ -862,8 +987,17 @@ def robustness(cfg: dict, data: dict, bt: dict | None = None) -> dict:
                     benchmark_cagr=perf_metrics(b2["benchmarks"][prim].net, None, b2["rf"])["cagr"],
                     benchmark_sharpe=perf_metrics(b2["benchmarks"][prim].net, None, b2["rf"])["sharpe"])
     # 2. Timing: lag 1 (Faber) vs lag 2 (one month later, fully safe); lag 0 = look-ahead, shown as a warning.
-    out["lag"] = pd.DataFrame([variant(f"lag {L}", signal_lag=L) for L in (1, 2)] +
-                              [variant("lag 0 (look-ahead, NOT implementable)", signal_lag=0)]).set_index("variant")
+    rows = [variant("lag 1", signal_lag=1)]
+    try:  # realistic execution: the order goes in after the month-end close and fills at the next day's close
+        nd = run_backtest(cfg, next_day_data(data))
+        rows.append(dict(variant="next trading day's close", **_summary_row(nd["strategy"].net, nd["benchmarks"][prim].net, nd["rf"]),
+                         turnover_pa=turnover_stats(nd["strategy"])["turnover_pa"],
+                         benchmark_cagr=perf_metrics(nd["benchmarks"][prim].net, None, nd["rf"])["cagr"],
+                         benchmark_sharpe=perf_metrics(nd["benchmarks"][prim].net, None, nd["rf"])["sharpe"]))
+    except ValueError:
+        pass
+    rows += [variant("lag 2", signal_lag=2), variant("lag 0 (look-ahead, NOT implementable)", signal_lag=0)]
+    out["lag"] = pd.DataFrame(rows).set_index("variant")
     # 3. Rebalancing: the static benchmark (hidden-rebalancing check, Lecture 4.3) and the strategy's sleeves.
     rows = []
     for reb in ("M", "Q", "A", "none", 0.05):
@@ -908,9 +1042,12 @@ def robustness(cfg: dict, data: dict, bt: dict | None = None) -> dict:
     out["currency"] = pd.DataFrame(rows)
     # 7. Parameter stability (NOT optimisation: 10 months stays fixed from the paper), on a common sample.
     if cfg["rule"] == "sma_trend":
+        common = max(pd.Timestamp(cfg["start"]), pd.Timestamp(cfg["sma_stability_start"]),
+                     earliest_start(cfg, data, max(cfg["sma_stability"])))
+        cs = common.strftime("%Y-%m-%d")
         out["sma_stability"] = pd.DataFrame(
-            [variant(f"{n} months", sma_window=n, start=cfg["sma_stability_start"]) for n in cfg["sma_stability"]]
-        ).set_index("variant")
+            [variant(f"{n} months", sma_window=n, start=cs) for n in cfg["sma_stability"]]).set_index("variant")
+        out["sma_stability_start"] = common.strftime("%Y-%m")
         out["signal_currency"] = pd.DataFrame([variant("signal on USD price (base case)", signal_on="USD"),
                                                variant("signal on EUR price", signal_on="base")]).set_index("variant")
         out["events_2020"] = signal_events(bt, "2020-01-01", "2020-12-31")
@@ -960,8 +1097,11 @@ def monte_carlo(cfg: dict, bt: dict, against: str | None = None) -> dict:
     kw = dict(n_paths=cfg["mc_paths"], n_months=cfg["mc_years"] * PERIODS, initial=cfg["mc_initial"],
               seed=cfg["mc_seed"])
     base = block_bootstrap(df, block=cfg["mc_block"], **kw)
-    excess_mean = df.sub(bt["rf"], axis=0).mean()
-    base["haircut_summary"] = block_bootstrap(df - 0.5 * excess_mean, block=cfg["mc_block"], **kw)["summary"]
+    cut = max(0.0, 0.5 * float((df["Strategy"] - bt["rf"]).mean()))  # McLean-Pontiff: published edges decay
+    hair = df.copy()
+    hair["Strategy"] = hair["Strategy"] - cut                          # benchmark unchanged
+    base["haircut_summary"] = block_bootstrap(hair, block=cfg["mc_block"], **kw)["summary"]
+    base["haircut_monthly"] = cut
     base["block_alternatives"] = {b: block_bootstrap(df, block=b, **kw)["summary"] for b in cfg["mc_block_alternatives"]}
     return base
 
@@ -1025,16 +1165,22 @@ def extra_robustness(cfg: dict, data: dict, bt: dict) -> dict:
     base = dict(anchor="month-end (base case)", **_summary_row(bt["strategy"].net, pb.net, rf),
                 benchmark_cagr=perf_metrics(pb.net, None, rf)["cagr"], benchmark_sharpe=perf_metrics(pb.net, None, rf)["sharpe"])
     rows.append(base)
+    skipped = []
     for day in cfg["timing_anchor_days"]:
+        if data.get("daily_prices") is None or data.get("fx_daily") is None:
+            skipped.append(dict(day=day, reason="no daily data (snapshot input)"))
+            continue
         try:
             b2 = run_backtest(cfg, anchored_data(data, day))
-        except ValueError:
+        except ValueError as e:  # e.g. too little history for that anchor; reported, not hidden
+            skipped.append(dict(day=day, reason=str(e)))
             continue
         p2 = b2["benchmarks"][prim]
         rows.append(dict(anchor=f"day {day} of each month", **_summary_row(b2["strategy"].net, p2.net, b2["rf"]),
                          benchmark_cagr=perf_metrics(p2.net, None, b2["rf"])["cagr"],
                          benchmark_sharpe=perf_metrics(p2.net, None, b2["rf"])["sharpe"]))
     out["timing_luck"] = pd.DataFrame(rows).set_index("anchor")
+    out["timing_luck_skipped"] = skipped
     rows = []
     cba = cfg["cost_bps_by_asset"]
     for name, sim in [("Strategy", bt["strategy"])] + [(v.name, v) for v in bt["benchmarks"].values()]:
@@ -1085,9 +1231,16 @@ def apply_style():
     })
 
 
+MINUS = "−"  # typographic minus, as in the prospectus tables
+
+
+def _neg(txt: str) -> str:
+    return txt.replace("-", MINUS)
+
+
 def _pct_axis(ax, decimals=0):
     from matplotlib.ticker import FuncFormatter
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v * 100:.{decimals}f}%"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: _neg(f"{v * 100:.{decimals}f}%")))
 
 
 def _spread_labels(ax, items: list, min_gap: float = 0.075, fontsize: float = 6.0):
@@ -1104,7 +1257,7 @@ def _spread_labels(ax, items: list, min_gap: float = 0.075, fontsize: float = 6.
     if ys and ys[-1] > 0.98:
         ys = [y - (ys[-1] - 0.98) for y in ys]
     for y, (_, t, c, fw) in zip(ys, pts):
-        ax.annotate(t, xy=(1.01, y), xycoords="axes fraction", color=c, fontsize=fontsize, va="center",
+        ax.annotate(_neg(t), xy=(1.01, y), xycoords="axes fraction", color=c, fontsize=fontsize, va="center",
                     fontweight=fw, annotation_clip=False)
 
 
@@ -1121,9 +1274,9 @@ def _finish(fig, ax, title: str | None, subtitle: str | None, source: bool = Tru
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     fw = fig.get_window_extent().width
-    margin = 0.025 * fw  # glyphs render a little wider at print resolution than at screen resolution
+    margin = 0.04 * fw  # glyphs (bold especially) render wider at print resolution than at screen resolution
     right = max([t.get_window_extent(renderer).x1 for a in fig.axes for t in a.texts] + [0])
-    left = min([a.yaxis.label.get_window_extent(renderer).x0 for a in fig.axes] + [fw])
+    left = min([a.yaxis.label.get_window_extent(renderer).x0 for a in fig.axes if a.yaxis.label.get_text()] + [fw])
     adj = {}
     if right > fw - margin:
         adj["right"] = fig.subplotpars.right - (right - fw + margin) / fw
@@ -1134,26 +1287,34 @@ def _finish(fig, ax, title: str | None, subtitle: str | None, source: bool = Tru
     return fig
 
 
+def _short(bt, k):
+    """Prospectus labels: the primary benchmark is 'B1', the other 'B2 (60/40)'."""
+    return "B1" if k == bt["primary"] else "B2 (60/40)"
+
+
 def _bench_style(bt, k):
     keys = list(bt["benchmarks"])
     colour = [STYLE["ochre"], STYLE["slate"], "#5B6B82"][keys.index(k) % 3]
     return colour, "-" if k == bt["primary"] else (0, (4, 2))
 
 
-def fig_cumulative(bt: dict, title=None, subtitle=None, log=True):
+def fig_cumulative(bt: dict, title=None, subtitle=None, log=True, show_gross=False):
     """F1: growth of 1 (all series start at exactly 1.0 on the same date)."""
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter, FixedLocator, NullFormatter
     fig, ax = plt.subplots(figsize=_size("F1"))
-    s_net = wealth_index(bt["strategy"].net); s_gr = wealth_index(bt["strategy"].gross)
-    ax.plot(s_gr.index, s_gr, color=STYLE["navy"], lw=0.8, ls=(0, (3, 2)), alpha=0.8)
-    ax.plot(s_net.index, s_net, color=STYLE["navy"], lw=1.6)
-    ends = [(s_net, "Strategy (net)", STYLE["navy"], "bold"), (s_gr, "Strategy (gross)", STYLE["navy"], "normal")]
+    s_net = wealth_index(bt["strategy"].net)
+    ends = [(s_net, "Strategy", STYLE["navy"], "bold")]
+    if show_gross:
+        s_gr = wealth_index(bt["strategy"].gross)
+        ax.plot(s_gr.index, s_gr, color=STYLE["navy"], lw=0.6, ls=(0, (1, 1.5)), alpha=0.7)
+        ends.append((s_gr, "Strategy before costs", STYLE["navy"], "normal"))
     for k, v in bt["benchmarks"].items():
         w = wealth_index(v.net)
         c, ls = _bench_style(bt, k)
         ax.plot(w.index, w, color=c, lw=1.1, ls=ls)
-        ends.append((w, v.name, c, "bold"))
+        ends.append((w, _short(bt, k), c, "bold"))
+    ax.plot(s_net.index, s_net, color=STYLE["navy"], lw=1.6)
     if log:
         ax.set_yscale("log")
         top = max(float(e[0].max()) for e in ends); bot = min(float(e[0].min()) for e in ends)
@@ -1162,14 +1323,13 @@ def fig_cumulative(bt: dict, title=None, subtitle=None, log=True):
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
         ax.yaxis.set_minor_formatter(NullFormatter())
     ax.axhline(1.0, color=STYLE["ink"], lw=0.4, alpha=0.6)
-    ax.set_ylabel(f"Value of 1 {bt['cfg']['base_ccy']} invested")
     ax.set_xlim(s_net.index[0], s_net.index[-1])
     _spread_labels(ax, [(w.iloc[-1], f"{lab} {w.iloc[-1]:.2f}", c, fw) for w, lab, c, fw in ends])
     return _finish(fig, ax, title, subtitle)
 
 
-def fig_drawdowns(bt: dict, title=None, subtitle=None):
-    """F2: fall from the previous high, strategy vs benchmarks; labels give each worst fall."""
+def fig_drawdowns(bt: dict, title=None, subtitle=None, ceiling: float = 0.20):
+    """F2: fall from the previous high, strategy vs benchmarks, with the client's ceiling."""
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=_size("F2"))
     dd = drawdown(bt["strategy"].net)
@@ -1180,27 +1340,30 @@ def fig_drawdowns(bt: dict, title=None, subtitle=None):
         d = drawdown(v.net)
         c, ls = _bench_style(bt, k)
         ax.plot(d.index, d, color=c, lw=0.9, ls=ls)
-        items.append((float(d.min()), f"{v.name.split(' ')[0]} worst {d.min():.0%}", c, "bold"))
+        items.append((float(d.min()), f"{_short(bt, k)} worst {d.min():.0%}", c, "bold"))
+    if ceiling:
+        ax.axhline(-ceiling, color=STYLE["ink"], lw=0.6, ls=(0, (4, 2)))
+        ax.annotate(_neg(f"Client ceiling -{ceiling:.0%}"), xy=(0.005, -ceiling), xycoords=("axes fraction", "data"),
+                    xytext=(0, 2), textcoords="offset points", fontsize=5.5, color=STYLE["ink"], va="bottom")
     _pct_axis(ax)
     ax.set_xlim(dd.index[0], dd.index[-1])
-    ax.set_ylabel("Fall from high")
     _spread_labels(ax, items, min_gap=0.16)
     return _finish(fig, ax, title, subtitle)
 
 
 def fig_weights(bt: dict, title=None, subtitle=None):
-    """F3: what the strategy held each month (sleeves in their asset or in cash)."""
+    """F3: share of the portfolio waiting in cash each month (the rest is invested), with its average."""
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=_size("F3"))
-    w = bt["strategy"].held
-    cols = [c for c in w.columns if c != CASH] + [CASH]
-    ax.stackplot(w.index, *[w[c].to_numpy() for c in cols], colors=[ASSET_COLOURS.get(c, STYLE["slate"]) for c in cols],
-                 labels=[c if c != CASH else "Cash" for c in cols], lw=0, step="post")
-    ax.set_ylim(0, 1); ax.set_xlim(w.index[0], w.index[-1])
+    cash = bt["strategy"].held[CASH]
+    ax.fill_between(cash.index, cash.to_numpy(), 0, step="post", color=STYLE["navy"], lw=0, alpha=0.85)
+    ax.axhline(float(cash.mean()), color=STYLE["ink"], lw=0.7, ls=(0, (4, 2)))
+    ax.annotate(f"average {cash.mean():.0%} in cash", xy=(0.99, float(cash.mean())), xycoords=("axes fraction", "data"),
+                xytext=(0, 3), textcoords="offset points", ha="right", va="bottom", fontsize=5.5, color=STYLE["ink"],
+                bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none", alpha=0.85))
+    ax.set_ylim(0, 1); ax.set_xlim(cash.index[0], cash.index[-1])
     _pct_axis(ax)
-    ax.set_ylabel("Weight")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=6, fontsize=5.5, handlelength=0.9,
-              columnspacing=0.8, handletextpad=0.3)
+    ax.set_ylabel("Share in cash")
     return _finish(fig, ax, title, subtitle)
 
 
@@ -1215,13 +1378,15 @@ def fig_rolling(bt: dict, window: int = 36, title=None, subtitle=None):
     a1.plot(rb.index, rb["rolling_sharpe"], color=STYLE["ochre"], lw=0.9)
     a1.axhline(0, color=STYLE["ink"], lw=0.4)
     a1.set_ylabel(f"Sharpe ({window}m)")
+    a1.yaxis.set_major_formatter(__import__("matplotlib.ticker", fromlist=["FuncFormatter"]).FuncFormatter(
+        lambda v, _: _neg(f"{v:g}")))
     _spread_labels(a1, [(rs["rolling_sharpe"].iloc[-1], "Strategy", STYLE["navy"], "bold"),
-                        (rb["rolling_sharpe"].iloc[-1], pb.name.split(" ")[0], STYLE["ochre"], "bold")], min_gap=0.14)
+                        (rb["rolling_sharpe"].iloc[-1], "B1", STYLE["ochre"], "bold")], min_gap=0.14)
     a2.plot(rs.index, rs["rolling_beta"], color=STYLE["navy"], lw=1.1)
     a2.axhline(1, color=STYLE["ink"], lw=0.4, ls=":")
     a2.set_ylabel(f"Beta ({window}m)")
     a2.set_ylim(0, max(1.1, float(rs["rolling_beta"].max()) * 1.1))
-    _spread_labels(a2, [(rs["rolling_beta"].iloc[-1], f"vs {pb.name.split(' ')[0]}", STYLE["navy"], "bold")])
+    _spread_labels(a2, [(rs["rolling_beta"].iloc[-1], "vs B1", STYLE["navy"], "bold")])
     return _finish(fig, a1, title, subtitle)
 
 
@@ -1237,26 +1402,24 @@ def cost_sensitivity(bt: dict, max_bps: int = 60, step: int = 2) -> pd.DataFrame
 
 
 def fig_costs(bt: dict, title=None, subtitle=None):
-    """F5: final value of 1 against the cost per trade; breakeven vs the primary benchmark marked."""
+    """F5: final value of 1 against the cost per trade, strategy vs B1, breakeven marked."""
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=_size("F5"))
     cs = cost_sensitivity(bt)
+    pb = bt["benchmarks"][bt["primary"]]
     ax.plot(cs.index, cs["Strategy"], color=STYLE["navy"], lw=1.6)
-    items = [(cs["Strategy"].iloc[-1], "Strategy", STYLE["navy"], "bold")]
-    for k, v in bt["benchmarks"].items():
-        c, ls = _bench_style(bt, k)
-        ax.plot(cs.index, cs[v.name], color=c, lw=1.0, ls=ls)
-        items.append((cs[v.name].iloc[-1], v.name.split(" ")[0], c, "bold"))
+    ax.plot(cs.index, cs[pb.name], color=STYLE["ochre"], lw=1.1)
+    items = [(cs["Strategy"].iloc[-1], "Strategy", STYLE["navy"], "bold"),
+             (cs[pb.name].iloc[-1], "B1", STYLE["ochre"], "bold")]
     cb = bt["cfg"]["cost_bps"]
     ax.axvline(cb, color=STYLE["ink"], lw=0.5, ls=":")
-    ax.annotate(f"base case {cb:.0f} bps", xy=(cb, 0.3), xycoords=("data", "axes fraction"), xytext=(-3, 0),
-                textcoords="offset points", fontsize=5.5, rotation=90, ha="right", va="center")
-    be = breakeven_cost(bt["strategy"], bt["benchmarks"][bt["primary"]], bt["rf"], "cagr",
-                        bt["cfg"].get("benchmark_costs", True))
+    ax.annotate(f"base case {cb:.0f} bps", xy=(cb, 0.16), xycoords=("data", "axes fraction"), xytext=(-3, 0),
+                textcoords="offset points", fontsize=5.5, ha="right", va="center")
+    be = breakeven_cost(bt["strategy"], pb, bt["rf"], "cagr", bt["cfg"].get("benchmark_costs", True))
     if be is not None and math.isfinite(be) and be <= cs.index.max():
-        ax.axvline(be, color=STYLE["loss"], lw=0.7, ls="--")
+        ax.axvline(be, color=STYLE["navy"], lw=0.7, ls="--")
         ax.annotate(f"breakeven {be:.0f} bps", xy=(be, 0.06), xycoords=("data", "axes fraction"), xytext=(3, 0),
-                    textcoords="offset points", fontsize=5.5, color=STYLE["loss"])
+                    textcoords="offset points", fontsize=5.5, color=STYLE["navy"])
     ax.set_xlim(0, cs.index.max())
     ax.set_xlabel("Cost per trade (bps of traded value)")
     ax.set_ylabel("Final value of 1")
@@ -1272,10 +1435,11 @@ def fig_subperiods(rob: dict, title=None, subtitle=None):
     fig, ax = plt.subplots(figsize=_size("F6"))
     width = 0.8 / len(ports)
     cols = [STYLE["navy"], STYLE["ochre"], STYLE["slate"]]
+    names = ["Strategy", "B1", "B2 (60/40)"]
     for i, p in enumerate(ports):
         vals = [float(sp[(sp.period == per) & (sp.portfolio == p)]["cagr"].iloc[0]) for per in periods]
         x = np.arange(len(periods)) + (i - (len(ports) - 1) / 2) * width
-        ax.bar(x, vals, width=width * 0.92, color=cols[i % 3], label=p.split(" ")[0] if i else "Strategy")
+        ax.bar(x, vals, width=width * 0.92, color=cols[i % 3], label=names[i] if i < 3 else p)
     ax.set_xticks(np.arange(len(periods))); ax.set_xticklabels([p.split(" ", 1)[0] for p in periods])
     ax.axhline(0, color=STYLE["ink"], lw=0.4)
     _pct_axis(ax)
@@ -1285,22 +1449,23 @@ def fig_subperiods(rob: dict, title=None, subtitle=None):
 
 
 def fig_montecarlo(mc: dict, title=None, subtitle=None):
-    """F7: 10-year outcome ranges for 10,000 EUR (P10-P90 band, median line), strategy vs 60/40."""
+    """F7: 10-year outcome ranges for 10,000 EUR: strategy P10-P90 band with median, 60/40 median for comparison."""
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
+    from matplotlib.ticker import FuncFormatter, MultipleLocator
     fig, ax = plt.subplots(figsize=_size("F7"))
     x = np.arange(mc["n_months"] + 1) / PERIODS
-    items = []
-    for c, colour in zip(mc["columns"][:2], [STYLE["navy"], STYLE["slate"]]):
-        b = mc["bands"][c]
-        short = "Strategy" if c == "Strategy" else c.split(" ")[0]
-        ax.fill_between(x, b["p10"], b["p90"], color=colour, alpha=0.16, lw=0)
-        ax.plot(x, b["p50"], color=colour, lw=1.3)
-        ax.plot(x, b["p10"], color=colour, lw=0.6, ls=":")
-        items += [(b["p50"].iloc[-1], f"{short} P50 {b['p50'].iloc[-1]:,.0f}", colour, "bold"),
-                  (b["p10"].iloc[-1], f"{short} P10 {b['p10'].iloc[-1]:,.0f}", colour, "normal"),
-                  (b["p90"].iloc[-1], f"{short} P90 {b['p90'].iloc[-1]:,.0f}", colour, "normal")]
+    s_col, b_col = mc["columns"][0], mc["columns"][1]
+    s, b = mc["bands"][s_col], mc["bands"][b_col]
+    ax.fill_between(x, s["p10"], s["p90"], color=STYLE["navy"], alpha=0.16, lw=0)
+    ax.plot(x, s["p50"], color=STYLE["navy"], lw=1.3)
+    ax.plot(x, s["p10"], color=STYLE["navy"], lw=0.6, ls=":")
+    ax.plot(x, b["p50"], color=STYLE["slate"], lw=1.1, ls=(0, (4, 2)))
+    items = [(s["p50"].iloc[-1], f"Strategy P50 {s['p50'].iloc[-1]:,.0f}", STYLE["navy"], "bold"),
+             (s["p10"].iloc[-1], f"Strategy P10 {s['p10'].iloc[-1]:,.0f}", STYLE["navy"], "normal"),
+             (s["p90"].iloc[-1], f"Strategy P90 {s['p90'].iloc[-1]:,.0f}", STYLE["navy"], "normal"),
+             (b["p50"].iloc[-1], f"B2 (60/40) P50 {b['p50'].iloc[-1]:,.0f}", STYLE["slate"], "bold")]
     ax.axhline(mc["initial"], color=STYLE["ink"], lw=0.4)
+    ax.yaxis.set_major_locator(MultipleLocator(5000))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:,.0f}k"))
     ax.set_xlabel("Years"); ax.set_ylabel("Value (EUR)")
     ax.set_xlim(0, x[-1])
@@ -1308,34 +1473,33 @@ def fig_montecarlo(mc: dict, title=None, subtitle=None):
     return _finish(fig, ax, title, subtitle)
 
 
-def fig_calendar(bt: dict, title=None, subtitle=None, include_second=False):
-    """F8: calendar-year returns, PRIIPs KID chart rules (linear axis, axis at 0%, label on every bar)."""
+def fig_calendar(bt: dict, title=None, subtitle=None, include_second=False, labels=False):
+    """F8: calendar-year returns, PRIIPs KID chart rules (linear axis, axis at 0%, benchmark bar beside)."""
     import matplotlib.pyplot as plt
     pb = bt["benchmarks"][bt["primary"]]
-    series = {"Strategy": bt["strategy"].net, pb.name: pb.net}
+    series = {"Strategy": bt["strategy"].net, "B1": pb.net}
     if include_second:
         for k, v in bt["benchmarks"].items():
             if k != bt["primary"]:
-                series[v.name] = v.net
+                series["B2 (60/40)"] = v.net
     ann = annual_returns(series)
     fig, ax = plt.subplots(figsize=_size("F8") if not include_second else (170 * MM, 55 * MM))
     k = len(series); width = 0.8 / k
     colours = [STYLE["navy"], STYLE["ochre"], STYLE["slate"]]
+    alphas = [1.0, 0.55, 0.8]
     for i, c in enumerate(ann.columns):
         x = np.arange(len(ann)) + (i - (k - 1) / 2) * width
-        ax.bar(x, ann[c].to_numpy(), width=width * 0.9, color=colours[i], label=c)
-        for xi, v in zip(x, ann[c].to_numpy()):
-            label = f"{v * 100:.1f}".replace("-0.0", "0.0")
-            ax.annotate(label, xy=(xi, v), xytext=(0, 1.2 if v >= 0 else -1.2), textcoords="offset points",
-                        ha="center", va="bottom" if v >= 0 else "top", fontsize=3.3, color=colours[i])
+        ax.bar(x, ann[c].to_numpy(), width=width * 0.9, color=colours[i], alpha=alphas[i], label=c)
+        if labels:
+            for xi, v in zip(x, ann[c].to_numpy()):
+                ax.annotate(_neg(f"{v * 100:.1f}").replace(MINUS + "0.0", "0.0"), xy=(xi, v),
+                            xytext=(0, 1.2 if v >= 0 else -1.2), textcoords="offset points", ha="center",
+                            va="bottom" if v >= 0 else "top", fontsize=3.3, color=colours[i])
     ax.axhline(0, color=STYLE["ink"], lw=0.5)
     ax.set_xticks(np.arange(len(ann))); ax.set_xticklabels([str(y) for y in ann.index])
     ax.tick_params(axis="x", length=0)
     _pct_axis(ax)
-    lo, hi = ax.get_ylim(); ax.set_ylim(lo * 1.15, hi * 1.2)
     ax.legend(loc="upper left", ncol=k, fontsize=5.5)
-    ax.text(0.995, 0.03, "Simulated (back-tested) past performance", transform=ax.transAxes, ha="right", va="bottom",
-            fontsize=5.5, fontweight="bold")
     return _finish(fig, ax, title, subtitle)
 
 
@@ -1492,9 +1656,10 @@ def self_tests(cfg: dict, data: dict, bt: dict | None = None) -> pd.DataFrame:
     if cfg.get("hedge_tickers") and cfg["base_ccy"] == "EUR":
         h = cfg["hedge_tickers"][0]
         usd = data["prices_usd"][h].pct_change(fill_method=None).reindex(bt["index"])
-        want = usd + data["rf"]["EUR"].reindex(bt["index"]) - data["rf"]["USD"].reindex(bt["index"])
+        leg = data["rf_hedge_usd"] if data.get("rf_hedge_usd") is not None else data["rf"]["USD"]
+        want = usd + data["rf"]["EUR"].reindex(bt["index"]) - leg.reindex(bt["index"])
         d13 = float((bt["returns"][h] - want).abs().max())
-        add(f"Hedged {h} return = USD return + (rf EUR - rf USD)", d13 < 1e-15, f"max diff {d13:.1e}")
+        add(f"Hedged {h} return = USD return + (EUR overnight - USD overnight)", d13 < 1e-15, f"max diff {d13:.1e}")
     return pd.DataFrame(res)
 
 
@@ -1541,8 +1706,7 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
                       switches_per_year=(risky > 1e-12).astype(int).diff().abs().sum() / years,
                       latest_weights=held.iloc[-1], latest_month=held.index[-1].strftime("%Y-%m"))
     ann = annual_returns(series)
-    sri_s = sri_priips(bt["strategy"].net, cfg["sri_rhp_years"])
-    sri_b = sri_priips(bt["benchmarks"][prim].net, cfg["sri_rhp_years"])
+    ri = risk_indicator(cfg, data, bt)
     vols5 = {k: float(v.iloc[-60:].std() * math.sqrt(PERIODS)) for k, v in series.items()}
     w_avg = held.mean()
     ter = sum(float(w_avg.get(t, 0.0)) * cfg["ucits"].get(t, {}).get("ter", 0.0) for t in w_avg.index)
@@ -1586,11 +1750,13 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
         breakeven_cost_bps=rob["breakeven"], allocation=allocation,
         calendar_year_returns=[dict(year=int(y), **{k: float(v) for k, v in row.items()})
                                for y, row in ann.iterrows()],
-        risk_indicator=dict(sri=max(sri_s["sri_class"], sri_b["sri_class"]), strategy=sri_s,
-                            unfiltered_reference_mix=sri_b,
-                            method=(f"Indicative PRIIPs SRI, authors' calculation: Cornish-Fisher VaR 97.5% on the "
-                                    f"last 60 monthly returns, RHP {cfg['sri_rhp_years']} years, +1 class for monthly "
-                                    f"data, higher of strategy and unfiltered 1/n mix. Not an official KID figure."),
+        risk_indicator=dict(sri=ri["sri"], method_used=ri["method"], daily=ri["daily"],
+                            monthly_cross_check=ri["monthly_cross_check"],
+                            method=("Indicative PRIIPs SRI, authors' calculation: Cornish-Fisher VaR 97.5% on the last "
+                                    f"5 years of daily back-tested returns (monthly weights drifting daily), RHP "
+                                    f"{cfg['sri_rhp_years']} years, higher of strategy and unfiltered 1/n mix, no extra "
+                                    "class because daily prices exist (Annex II point 15 applies to monthly-only data). "
+                                    "Not an official KID figure. Monthly method (+1 class) kept as a cross-check."),
                             srri_old_bands={k: srri_class(v) for k, v in vols5.items()}, ann_vol_last_5y=vols5),
         robustness=dict(costs=rob["costs"], lag=rob["lag"], rebalancing=rob["rebalancing"].to_dict(orient="records"),
                         subperiods=rob["subperiods"].to_dict(orient="records"),
@@ -1602,14 +1768,16 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
                         extra=({"split_halves": extra_rob["split_halves"].to_dict(orient="records"),
                                 "timing_luck": extra_rob["timing_luck"],
                                 "cost_by_asset": extra_rob["cost_by_asset"],
-                                "sharpe_diff_ci": extra_rob["sharpe_diff_ci"]} if extra_rob else {})),
+                                "sharpe_diff_ci": extra_rob["sharpe_diff_ci"],
+                                "timing_luck_skipped": extra_rob.get("timing_luck_skipped", [])} if extra_rob else {}),
+                        sma_stability_start=rob.get("sma_stability_start")),
         rolling=dict(window=cfg["rolling_window"], sharpe_min=rs["rolling_sharpe"].min(),
                      sharpe_max=rs["rolling_sharpe"].max(), sharpe_last=rs["rolling_sharpe"].iloc[-1],
                      beta_min=rs["rolling_beta"].min(), beta_max=rs["rolling_beta"].max(),
                      beta_last=rs["rolling_beta"].iloc[-1],
                      share_windows_sharpe_above_benchmark=float(
                          (rs["rolling_sharpe"] > rsb["rolling_sharpe"].reindex(rs.index)).mean())),
-        monte_carlo=dict(n_paths=mc["n_paths"], years=mc["n_months"] / PERIODS, block_months=mc["block"],
+        monte_carlo=dict(haircut_monthly=mc.get("haircut_monthly"), n_paths=mc["n_paths"], years=mc["n_months"] / PERIODS, block_months=mc["block"],
                          method="circular block bootstrap, strategy and benchmark drawn on the same months",
                          initial_eur=mc["initial"], seed=mc["seed"], columns=mc["columns"], summary=mc["summary"],
                          haircut_summary=mc.get("haircut_summary"), block_alternatives=mc.get("block_alternatives")),
@@ -1623,6 +1791,16 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, tests: p
         tests=tests.to_dict(orient="records"),
         tests_all_pass=bool((tests["result"] != "FAIL").all()),   # SKIPPED = optional library unavailable
         tests_summary=tests["result"].value_counts().to_dict(),
+        test_counts=dict(n_pass=int((tests["result"] == "PASS").sum()), n_skip=int((tests["result"] == "SKIPPED").sum()),
+                         n_fail=int((tests["result"] == "FAIL").sum()), n_total=int(len(tests))),
+        headline=dict(sharpe=portfolios["strategy"]["sharpe"], sharpe_se=portfolios["strategy"]["sharpe_se"],
+                      sharpe_b1=portfolios[prim]["sharpe"], sri=ri["sri"],
+                      mc_strategy_p10=mc["summary"]["Strategy"]["p10"], mc_strategy_p50=mc["summary"]["Strategy"]["p50"],
+                      mc_strategy_p90=mc["summary"]["Strategy"]["p90"],
+                      mc_strategy_p50_haircut=(mc.get("haircut_summary") or {}).get("Strategy", {}).get("p50"),
+                      mc_strategy_p10_haircut=(mc.get("haircut_summary") or {}).get("Strategy", {}).get("p10"),
+                      mc_b2_p10=mc["summary"][mc["columns"][1]]["p10"], mc_b2_p50=mc["summary"][mc["columns"][1]]["p50"],
+                      mc_b2_p90=mc["summary"][mc["columns"][1]]["p90"]),
     )
     if extra:
         out.update(extra)

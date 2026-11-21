@@ -142,6 +142,11 @@ def mc_haircut_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: 
     return core.monte_carlo_haircut(run_cached(ui_items, data_stamp, engine_sha, _data))
 
 
+@st.cache_data(show_spinner="Running the notebook's robustness checks...", max_entries=32)
+def rob_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> dict:
+    return core.robustness(run_cached(ui_items, data_stamp, engine_sha, _data), _data)
+
+
 @st.cache_data(show_spinner="Running the four window lengths...", max_entries=32)
 def sma_cached(ui_items: tuple, data_stamp: str, engine_sha: str, _data: dict) -> dict:
     ui = dict(ui_items)
@@ -303,9 +308,13 @@ if res.sri:
     with h1:
         st.badge(f"Risk class {res.sri['sri']} of 7 (indicative SRI)",
                  icon=":material/speed:", color="blue",
-                 help="PRIIPs summary risk indicator, authors' calculation. 1 = lowest, 7 = highest risk. Computed like an EU key information document from the last 60 "
-                      "monthly returns over a 10-year holding period, plus one class because only monthly data are "
-                      "used; the higher of the strategy and the unfiltered 1/n mix. Indicative only.")
+                 help="PRIIPs summary risk indicator, authors' calculation, 1 = lowest, 7 = highest risk. "
+                      + ("From daily back-tested returns of the last five years over a 10-year holding period "
+                         "(Cornish-Fisher VaR), the higher of the strategy and the unfiltered 1/n mix. "
+                         if str(res.sri.get("method", "")).startswith("daily") else
+                         "From the last 60 monthly returns plus one class (only monthly data available here), the "
+                         "higher of the strategy and the unfiltered 1/n mix. ")
+                      + "Indicative only.")
 
 st.markdown(
     f"**10,000 {ccy}** invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y} would have grown to "
@@ -370,8 +379,9 @@ def guard(view: str):
                 icon=":material/info:")
 
 
-t_perf, t_crisis, t_table, t_hold, t_cost, t_sma, t_mc, t_method = st.tabs(
-    ["Performance", "Crisis replay", "All metrics", "Holdings", "Costs", "Window stability", "10-year outlook",
+t_perf, t_crisis, t_table, t_hold, t_cost, t_sma, t_rob, t_mc, t_method = st.tabs(
+    ["Performance", "Crisis replay", "All metrics", "Holdings", "Costs", "Window stability", "Robustness",
+     "10-year outlook",
      "Method"])
 
 with t_perf, guard("This view"):
@@ -535,6 +545,67 @@ with t_sma, guard("The window comparison"):
                f"drawdown of any window is {pct(worst_dd)}, against {pct(bench_dd)} for {bn} on the same sample. "
                "The window you chose in the sidebar does not change this table.")
 
+with t_rob, guard("The robustness checks"):
+    rb = rob_cached(*CACHE_ARGS)
+    st.caption("The notebook's own robustness checks, run for your current settings. Each one changes a single "
+               "assumption, to see whether the result survives it. " + DISCLAIMER)
+
+    def tbl(df, cols, names, idx_name):
+        t = df[[c for c in cols if c in df.columns]].copy()
+        fmt = {"cagr": pct, "ann_vol": pct, "max_drawdown": pct, "alpha_ann": pct, "sharpe": num,
+               "information_ratio": num, "benchmark_sharpe": num, "turnover_pa": lambda x: pct(x, 0)}
+        for c in t.columns:
+            t[c] = [fmt.get(c, num)(v) for v in t[c]]
+        t = t.rename(columns=names)
+        t.insert(0, idx_name, t.index)
+        return t
+
+    names = {"cagr": "CAGR", "ann_vol": "Volatility", "sharpe": "Sharpe", "max_drawdown": "Max drawdown",
+             "alpha_ann": f"Alpha vs {bn}", "information_ratio": f"IR vs {bn}", "benchmark_sharpe": f"{bn} Sharpe",
+             "turnover_pa": "Turnover p.a."}
+    cols = ["cagr", "ann_vol", "sharpe", "max_drawdown", "alpha_ann", "benchmark_sharpe"]
+    lag = rb["rob"].get("lag")
+    if lag is not None and len(lag):
+        st.markdown("##### When are trades executed?")
+        st.dataframe(tbl(lag, cols, names, "Execution"), hide_index=True, width="stretch")
+        st.caption("Lag 1 trades at the month-end close the signal is computed on (as in Faber 2007). The next "
+                   "trading day's close is the realistic version; lag 2 waits a full month. Lag 0 uses the same "
+                   "month's return and is shown only to prove the look-ahead test bites: it is not implementable.")
+    ex = rb.get("extra", {})
+    tl = ex.get("timing_luck")
+    if tl is not None and len(tl):
+        st.markdown("##### Does it matter which day of the month we rebalance?")
+        st.dataframe(tbl(tl, cols, names, "Signal and trade day"), hide_index=True, width="stretch")
+        base_sh = tl["sharpe"].iloc[0]
+        rank = int((tl["sharpe"] > base_sh).sum()) + 1
+        st.caption(f"Month-end ranks {rank} of {len(tl)} days on Sharpe; other days give {tl['sharpe'].iloc[1:].min():.2f} "
+                   f"to {tl['sharpe'].iloc[1:].max():.2f}. Part of the headline result is timing luck (Hoffstein, "
+                   "Sibears and Faber 2019), which is why the prospectus reports this range.")
+    elif ex.get("timing_luck_skipped") is not None or tl is not None:
+        st.info("The day-of-month check needs daily prices, which this data source does not include.")
+    sh = ex.get("split_halves")
+    if sh is not None and len(sh):
+        st.markdown("##### First half against second half of the sample")
+        t = sh.copy()
+        st.dataframe(tbl(t.set_index(t["period"] + " · " + t["portfolio"]), ["cagr", "ann_vol", "sharpe", "max_drawdown"],
+                         names, "Period · portfolio"), hide_index=True, width="stretch")
+    ci = ex.get("sharpe_diff_ci")
+    if ci:
+        st.markdown(f"##### Is the Sharpe advantage over {bn} more than luck?")
+        st.markdown(f"Sharpe difference **{ci['diff']:+.2f}**, 95% interval **{ci['ci_low']:+.2f} to {ci['ci_high']:+.2f}** "
+                    f"({ci['draws']:,} block-bootstrap draws, {ci['block']}-month blocks); the difference is positive in "
+                    f"{ci['share_positive']:.0%} of draws. " + ("The interval includes zero, so the advantage is not "
+                    "statistically certain." if ci['ci_low'] <= 0 <= ci['ci_high'] else "The interval excludes zero."))
+    cba = ex.get("cost_by_asset")
+    if cba is not None and len(cba):
+        st.markdown("##### Costs by fund instead of one flat rate")
+        st.dataframe(tbl(cba.rename(columns={"cagr_flat": "cagr", "sharpe_flat": "sharpe"})
+                     .assign(cagr_by_asset=cba["cagr_by_asset"], sharpe_by_asset=cba["sharpe_by_asset"]),
+                         ["cagr", "cagr_by_asset", "sharpe", "sharpe_by_asset"],
+                         {"cagr": "CAGR (flat)", "cagr_by_asset": "CAGR (by fund)", "sharpe": "Sharpe (flat)",
+                          "sharpe_by_asset": "Sharpe (by fund)"}, "Portfolio"), hide_index=True, width="stretch")
+        st.caption("By fund: 2 bps for the equity and bond funds, 10 bps for real estate and commodities (wider spreads).")
+
 with t_mc, guard("The 10-year outlook"):
     haircut = st.toggle("Cautious variant: halve the historical excess return", value=False,
                         help="Published rules often work less well after publication (McLean and Pontiff 2016). "
@@ -582,7 +653,8 @@ reduced to the last close of each month. Risk-free rates and FX as downloaded fo
 {data['sources']['rf_USD']}; EUR rate {data['sources']['rf_EUR']}; EUR/USD {data['sources']['fx']}.
 US-listed funds stand in for the UCITS funds an EU investor would buy, because their history is longer.
 In the EUR view, USD returns are converted with r_EUR = (1 + r_USD) x S(t-1) / S(t) - 1 (S = USD per EUR);
-{"the bond slice (IEF) is EUR-hedged: r_USD + (rf_EUR - rf_USD), a covered-interest-parity approximation, while "
+{"the bond slice (IEF) is EUR-hedged: r_USD + (euro overnight rate - US overnight rate EFFR), a covered-interest-"
+ "parity approximation, while "
  "equities, real estate and commodities stay unhedged" if (cfg.get(core.HEDGE_KEY) and cfg['base_ccy'] == 'EUR')
  else "all slices are unhedged in this setting"}.
 
@@ -600,9 +672,10 @@ Both pay the same trading cost on their trades.
 Turnover = half the sum of absolute weight changes including cash, per year (one-way). Breakeven costs: the cost at
 which the strategy's growth rate (CAGR), or its Sharpe ratio, falls to the benchmark's, with both paying it.
 
-**Risk class.** Indicative PRIIPs summary risk indicator (1 to 7), authors' calculation: Cornish-Fisher VaR from the
-last 60 monthly returns over a 10-year holding period, one class added because only monthly data are used, and the
-higher of the strategy and the unfiltered 1/n mix.
+**Risk class.** Indicative PRIIPs summary risk indicator (1 to 7), authors' calculation: Cornish-Fisher VaR over a
+10-year holding period from daily back-tested returns of the last five years (monthly weights drifting daily), the
+higher of the strategy and the unfiltered 1/n mix. Without daily data the app falls back to the last 60 monthly
+returns plus one class, as the regulation requires.
 
 **Measures.** Simple returns throughout (they add up across assets; log returns do not). Average return = monthly
 mean x 12; volatility = sample standard deviation x sqrt(12); Sharpe = mean excess return / its standard

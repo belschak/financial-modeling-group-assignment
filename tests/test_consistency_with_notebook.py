@@ -78,3 +78,15 @@ def test_defaults_reproduce_notebook_results():
             checked += 1
     if checked < 4:
         pytest.skip(f"results.json shape not recognised ({checked} metrics matched); update ALIASES")
+
+
+def test_risk_class_matches_notebook():
+    path = results_json()
+    if path is None:
+        pytest.skip("notebook results.json not available yet")
+    ri = json.loads(path.read_text(encoding="utf-8")).get("risk_indicator", {})
+    if "sri" not in ri:
+        pytest.skip("results.json has no risk_indicator.sri")
+    data, _ = _inputs()
+    res = core.run(dict(core.DEFAULTS), data)
+    assert res.sri["sri"] == ri["sri"], (res.sri.get("method"), ri.get("method_used"))

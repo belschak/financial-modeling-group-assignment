@@ -40,6 +40,9 @@ Two views go beyond the headline numbers:
 - **Crisis replay**: the 2008 financial crisis, the 2011 euro crisis, the 2020 Covid crash, the 2022 rate shock and
   the February to April 2025 tariff shock. Strategy against both benchmarks through each window, plus a month-by-month
   strip of which slices were invested or in cash, and the list of switches.
+- **Robustness**: the notebook's own checks for your settings: execution timing (lag 1, next trading day, lag 2,
+  and the non-implementable lag 0 as a look-ahead control), rebalance-day timing luck, first vs second half of the
+  sample, a bootstrap interval for the Sharpe advantage, and costs by fund.
 - **Window stability**: the 6, 8, 10 and 12-month windows side by side on one common sample. It is a check that the
   result does not hinge on the 10 months from the paper, not a menu: choosing the best-looking window afterwards would
   be data-snooping.
@@ -48,10 +51,14 @@ Two views go beyond the headline numbers:
 
 ## Same calculations as the notebook
 
+**Engine frozen:** `fm_backtest.py` SHA-256
+`ffc29e11f02fc67f8ac678cc760d4a01c2637ba37538679f0ad4db23ddf7a50d` (final fresh-Colab run of the notebook,
+21.11.2026). The app footer and Method tab show the SHA of the engine actually running.
+
 `fm_backtest.py` is the **unchanged engine file** of the submitted notebook (the notebook writes it with
 `%%writefile`). The app never re-implements a calculation: `core.py` only maps the sidebar to the engine's `CONFIG`
 and calls engine functions (`run_backtest`, `metrics_table`, `turnover_stats`, `breakeven_cost`,
-`cost_sensitivity`, `annual_returns`, `sri_priips`, `monte_carlo`). The footer and the Method tab print the engine
+`cost_sensitivity`, `annual_returns`, `risk_indicator`, `monte_carlo`, `robustness`, `extra_robustness`). The footer and the Method tab print the engine
 version and SHA-256, which the notebook prints too, and the git commit of the running code.
 
 Tests (`pytest -q`):
@@ -76,7 +83,9 @@ batched download, cached for 12 hours.
 
 Yahoo sometimes throttles shared cloud servers. The app then shows "Live data unavailable, showing snapshot as of
 ...", never a traceback, and uses `data/snapshot_inputs.csv`: the same monthly inputs, saved with the engine's own
-`snapshot_frame` (`python tools/make_snapshot.py` refreshes it). "Data source" in the sidebar selects it explicitly.
+`snapshot_frame`: the monthly file is the notebook run's own input export, so offline defaults equal the notebook
+exactly; `data/snapshot_daily.csv` adds daily closes and FX for the daily risk class and the day-of-month check
+(`python tools/make_snapshot.py --from-notebook <notebook output folder>` refreshes both). "Data source" in the sidebar selects it explicitly.
 
 ## Run locally
 

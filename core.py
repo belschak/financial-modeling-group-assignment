@@ -86,7 +86,7 @@ class Result:
     breakeven_sharpe_bps: float | None   # on Sharpe
     cost_grid: pd.DataFrame      # growth of 1 by the end of the sample, by one-way cost (bps)
     annual: pd.DataFrame         # calendar-year returns (net), full years only
-    sri: dict | None             # indicative PRIIPs SRI: {"sri": int, "strategy": {...}, "b1": {...}}
+    sri: dict | None             # engine risk_indicator: {"sri": int, "method": str, "daily": ..., "monthly_cross_check": ...}
 
 
 def run(ui: dict, data: dict) -> Result:
@@ -115,18 +115,29 @@ def run(ui: dict, data: dict) -> Result:
         breakeven_sharpe_bps=fb.breakeven_cost(bt["strategy"], bench, bt["rf"], on="sharpe", bench_pays=pays),
         cost_grid=fb.cost_sensitivity(bt, max_bps=100, step=5),
         annual=annual.loc[full_years],
-        sri=_sri(cfg, bt),
+        sri=_sri(cfg, bt, data),
     )
 
 
-def _sri(cfg: dict, bt: dict) -> dict | None:
-    """Spec S5: the higher of the strategy's and the unfiltered 1/n mix's class (as the notebook does)."""
+def _sri(cfg: dict, bt: dict, data: dict) -> dict | None:
+    """Engine's final indicative SRI (daily method when daily data exist, else monthly +1 class): the higher of the
+    strategy and the unfiltered 1/n mix, exactly as the notebook reports it."""
+    if hasattr(fb, "risk_indicator"):
+        return fb.risk_indicator(cfg, data, bt)
     if not HAS_SRI or KEY_B1 not in bt["benchmarks"]:
         return None
     rhp = int(cfg.get("sri_rhp_years", 10))
     s = fb.sri_priips(bt["strategy"].net, rhp)
     b = fb.sri_priips(bt["benchmarks"][KEY_B1].net, rhp)
-    return dict(sri=max(s["sri_class"], b["sri_class"]), strategy=s, b1=b)
+    return dict(sri=max(s["sri_class"], b["sri_class"]), method="monthly")
+
+
+def robustness(res: Result, data: dict) -> dict:
+    """The notebook's robustness block for the current settings: engine robustness() + extra_robustness()."""
+    out = {"rob": fb.robustness(res.cfg, data, res.bt)}
+    if hasattr(fb, "extra_robustness"):
+        out["extra"] = fb.extra_robustness(res.cfg, data, res.bt)
+    return out
 
 
 def monte_carlo(res: Result) -> dict:
@@ -187,11 +198,13 @@ def sma_stability(ui: dict, data: dict) -> dict:
 
 
 def monte_carlo_haircut(res: Result) -> dict:
-    """The engine's haircut variant (excess return over cash halved, McLean-Pontiff 2016) with full bands.
-    Same transformation and call as fm_backtest.monte_carlo; a test checks its summary equals the engine's."""
+    """The engine's haircut variant with full bands (fm_backtest.monte_carlo only exports its summary): the
+    strategy's average excess return over cash is halved (McLean-Pontiff 2016), the benchmark is unchanged.
+    Same transformation and call as the engine; a test checks the summary equals the engine's haircut_summary."""
     c = res.cfg
     b = res.bt["benchmarks"][KEY_B2]
     df = pd.DataFrame({"Strategy": res.bt["strategy"].net, b.name: b.net})
-    excess_mean = df.sub(res.bt["rf"], axis=0).mean()
-    return fb.block_bootstrap(df - 0.5 * excess_mean, n_paths=c["mc_paths"], n_months=c["mc_years"] * fb.PERIODS,
+    cut = max(0.0, 0.5 * float((df["Strategy"] - res.bt["rf"]).mean()))
+    df["Strategy"] = df["Strategy"] - cut
+    return fb.block_bootstrap(df, n_paths=c["mc_paths"], n_months=c["mc_years"] * fb.PERIODS,
                               block=c["mc_block"], initial=c["mc_initial"], seed=c["mc_seed"])
