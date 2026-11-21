@@ -140,3 +140,58 @@ def wealth(r: pd.Series) -> pd.Series:
 
 def drawdown(r: pd.Series) -> pd.Series:
     return fb.drawdown(r)
+
+
+# ---------------------------------------------------------------- level-2 views (compose engine outputs only)
+# Crisis windows: the engine's own list plus the 2025 tariff shock (an app display window, not used in the notebook).
+CRISES = [tuple(w) for w in _D.get("crisis_windows", [])] + [("2025-02-01", "2025-04-30", "Feb-Apr 2025 tariff shock")]
+
+
+def crisis_view(res: Result, start: str, end: str, pad_months: int = 3) -> dict:
+    """Paths rebased to 1 just before the window (with context months either side), the window's cumulative
+    returns, which sleeves were invested each month, and the engine's list of exits/re-entries."""
+    s0 = pd.Timestamp(start) + pd.offsets.MonthEnd(0)
+    s1 = pd.Timestamp(end) + pd.offsets.MonthEnd(0)
+    ix = res.index
+    lo = ix[max(0, ix.searchsorted(s0) - pad_months)]
+    hi = ix[min(len(ix) - 1, ix.searchsorted(s1) + pad_months)]
+    series = {"Strategy": res.strat_net, **res.bench_net}
+    paths = {k: fb.wealth_index(v.loc[lo:hi]) for k, v in series.items()}
+    inside = ix[(ix >= s0) & (ix <= s1)]
+    window_ret = {k: float((1 + v.loc[inside]).prod() - 1) for k, v in series.items()} if len(inside) else {}
+    sig = res.bt.get("signals")
+    signals = sig.loc[lo:hi] if sig is not None else None
+    events = fb.signal_events(res.bt, str(lo.date()), str(hi.date())) if sig is not None else []
+    return dict(paths=paths, window=(s0, s1), returns=window_ret, signals=signals, events=events,
+                in_sample=len(inside) > 0)
+
+
+def earliest_start(data: dict, tickers, sma: int, lag: int) -> pd.Timestamp:
+    """First return month for which every selected fund has a full moving-average window before the decision."""
+    youngest = max(data["prices_usd"][t].first_valid_index() for t in tickers)
+    return youngest + pd.offsets.MonthEnd(int(sma) - 1 + int(lag))
+
+
+def sma_stability(ui: dict, data: dict) -> dict:
+    """All windows from the engine's stability list on ONE common sample (the longest window needs the most
+    history), other settings as chosen. A check that the result does not hinge on 10, not a search for the best."""
+    windows = list(_D.get("sma_stability", [6, 8, 10, 12]))
+    first = earliest_start(data, ui["tickers"], max(windows), ui["signal_lag"])
+    start = max(pd.Timestamp(ui["start"] + "-01") + pd.offsets.MonthEnd(0), first,
+                pd.Timestamp(_D.get("sma_stability_start", ui["start"] + "-01")) + pd.offsets.MonthEnd(0))
+    out = {}
+    for n in windows:
+        r = run({**ui, "sma_window": n, "start": start.strftime("%Y-%m")}, data)
+        out[n] = r
+    return dict(start=start, results=out)
+
+
+def monte_carlo_haircut(res: Result) -> dict:
+    """The engine's haircut variant (excess return over cash halved, McLean-Pontiff 2016) with full bands.
+    Same transformation and call as fm_backtest.monte_carlo; a test checks its summary equals the engine's."""
+    c = res.cfg
+    b = res.bt["benchmarks"][KEY_B2]
+    df = pd.DataFrame({"Strategy": res.bt["strategy"].net, b.name: b.net})
+    excess_mean = df.sub(res.bt["rf"], axis=0).mean()
+    return fb.block_bootstrap(df - 0.5 * excess_mean, n_paths=c["mc_paths"], n_months=c["mc_years"] * fb.PERIODS,
+                              block=c["mc_block"], initial=c["mc_initial"], seed=c["mc_seed"])

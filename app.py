@@ -117,6 +117,19 @@ def mc_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> d
     return core.monte_carlo(run_cached(ui_items, pref, data_stamp, engine_sha))
 
 
+@st.cache_data(show_spinner="Simulating the cautious variant...", max_entries=32)
+def mc_haircut_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
+    return core.monte_carlo_haircut(run_cached(ui_items, pref, data_stamp, engine_sha))
+
+
+@st.cache_data(show_spinner="Running the four window lengths...", max_entries=32)
+def sma_cached(ui_items: tuple, pref: str, data_stamp: str, engine_sha: str) -> dict:
+    data, _ = get_data(pref)
+    ui = dict(ui_items)
+    ui["tickers"] = list(ui["tickers"])
+    return core.sma_stability(ui, data)
+
+
 # ---------------------------------------------------------------- load data first (sidebar needs the date range)
 try:
     data, data_warning = get_data(st.session_state["data_pref"])
@@ -311,8 +324,11 @@ for i, (label, value, delta, unit, dcol, key) in enumerate(cards):
         col.metric(label, value, help=HELP[key])
 
 # ---------------------------------------------------------------- tabs
-t_perf, t_table, t_hold, t_cost, t_mc, t_method = st.tabs(
-    ["Performance", "All metrics", "Holdings", "Costs", "10-year outlook", "Method"])
+t_perf, t_crisis, t_table, t_hold, t_cost, t_sma, t_mc, t_method = st.tabs(
+    ["Performance", "Crisis replay", "All metrics", "Holdings", "Costs", "Window stability", "10-year outlook",
+     "Method"])
+CACHE_ARGS = (tuple(sorted(ui.items())), st.session_state["data_pref"], f"{data['origin']}|{data['retrieved_at']}",
+              ENGINE_SHA)
 
 with t_perf:
     c1, c2 = st.columns(2)
@@ -420,9 +436,67 @@ with t_cost:
                f"({pct(M.loc['cagr', S])} vs {pct(M.loc['cagr', P])} a year). Risk-adjusted (Sharpe) it stays ahead "
                f"up to {t4} per trade.")
 
+with t_crisis:
+    st.caption("How the strategy behaved in the big sell-offs of the sample, next to both benchmarks, and when each "
+               "slice moved to cash. " + DISCLAIMER)
+    in_sample = [c for c in core.CRISES if core.crisis_view(res, c[0], c[1])["in_sample"]]
+    if not in_sample:
+        st.info("None of the crisis windows lies inside the backtest period you chose.")
+    else:
+        pick = st.radio("Crisis", [c[2] for c in in_sample], horizontal=True, key="crisis_pick",
+                        label_visibility="collapsed")
+        s0, s1, lbl = next(c for c in in_sample if c[2] == pick)
+        cv = core.crisis_view(res, s0, s1)
+        cols = st.columns(len(cv["returns"]))
+        for colw, (name, v) in zip(cols, cv["returns"].items()):
+            colw.metric(f"{LBL_S if name == 'Strategy' else name}, {cv['window'][0]:%b %Y} to {cv['window'][1]:%b %Y}",
+                        pct(v))
+        cpaths = {LBL_S if k == "Strategy" else k: v for k, v in cv["paths"].items()}
+        st.plotly_chart(charts.crisis_paths(cpaths, styles, cv["window"], pal), width="stretch",
+                        config={"displayModeBar": False})
+        if cv["signals"] is not None:
+            st.markdown("##### Which slices were invested (dark) or in cash (light)")
+            st.plotly_chart(charts.signal_strip(cv["signals"], core.ASSET_NAMES, pal), width="stretch",
+                            config={"displayModeBar": False})
+            if cv["events"]:
+                ev = pd.DataFrame(cv["events"]).rename(columns={"month_held": "Month held", "ticker": "Fund",
+                                                               "action": "Change"})
+                with st.expander(f"{len(ev)} switches in this view"):
+                    st.dataframe(ev, hide_index=True, width="stretch")
+        st.caption("Paths start at 1.00 three months before the window (or at the start of your sample) so you see the "
+                   "run-up. Signals use month-end prices and are acted on with your signal delay.")
+
+with t_sma:
+    stab = sma_cached(*CACHE_ARGS)
+    st.markdown("##### Does the result depend on the 10-month window?")
+    st.caption("The 10-month window comes from Faber (2007) and was fixed before looking at our results. This view "
+               "is a stability check, not a menu: picking the window that looks best afterwards would be data-snooping "
+               f"and would overstate future results. All four use the same sample, from {stab['start']:%b %Y}, so "
+               "the longest window has enough history. " + DISCLAIMER)
+    rows, wl = [], {}
+    for n, rr in stab["results"].items():
+        mm = rr.metrics[core.STRATEGY]
+        rows.append({"Window": f"{n} months" + (" (paper)" if n == 10 else ""), "CAGR": pct(mm["cagr"]),
+                     "Volatility": pct(mm["ann_vol"]), "Sharpe": num(mm["sharpe"]),
+                     "Max drawdown": pct(mm["max_drawdown"]), f"Alpha vs {bn}": pct(mm["alpha_ann"]),
+                     "Turnover p.a.": pct(rr.turnover["turnover_pa"], 0)})
+        wl[n] = core.wealth(rr.strat_net)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.plotly_chart(charts.stability_lines(wl, 10, pal), width="stretch", config={"displayModeBar": False})
+    sh = [rr.metrics.loc["sharpe", core.STRATEGY] for rr in stab["results"].values()]
+    worst_dd = min(rr.metrics.loc["max_drawdown", core.STRATEGY] for rr in stab["results"].values())
+    bench_dd = next(iter(stab["results"].values())).metrics.loc["max_drawdown", P]
+    st.caption(f"Sharpe ratios range from {min(sh):.2f} to {max(sh):.2f} across the four windows. The deepest "
+               f"drawdown of any window is {pct(worst_dd)}, against {pct(bench_dd)} for {bn} on the same sample. "
+               "The window you chose in the sidebar does not change this table.")
+
 with t_mc:
-    mc = mc_cached(tuple(sorted(ui.items())), st.session_state["data_pref"],
-                   f"{data['origin']}|{data['retrieved_at']}", ENGINE_SHA)
+    haircut = st.toggle("Cautious variant: halve the historical excess return", value=False,
+                        help="Published rules often work less well after publication (McLean and Pontiff 2016). "
+                             "This variant cuts each portfolio's average return above cash in half before "
+                             "re-sampling.")
+    mc_base = mc_cached(*CACHE_ARGS)
+    mc = mc_haircut_cached(*CACHE_ARGS) if haircut else mc_base
     cfgm = res.cfg
     lo, hi = ("p10", "p90") if "p10" in mc["bands"]["Strategy"] else ("p5", "p95")
     lo_n, hi_n = int(lo[1:]), int(hi[1:])
@@ -445,8 +519,8 @@ with t_mc:
                      "Chance of ending below start": pct(sm.get("prob_below_start", sm.get("prob_loss")), 1),
                      "Chance of a fall > 20% on the way": pct(sm["prob_drawdown_over_20pct"], 1)})
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    hc = mc.get("haircut_summary")
-    if hc:
+    hc = mc_base.get("haircut_summary")
+    if hc and not haircut:
         st.caption(f"Cautious variant (half of the historical excess return, because published rules tend to work "
                    f"less well after publication): median {hc['Strategy'].get('p50', hc['Strategy'].get('median')):,.0f} for the strategy and "
                    f"{hc[core.BENCH_B2].get('p50', hc[core.BENCH_B2].get('median')):,.0f} for {core.BENCH_B2}.")

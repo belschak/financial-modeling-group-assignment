@@ -127,3 +127,49 @@ def _rgba(hex_color: str, alpha: float) -> str:
     h = hex_color.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
     return f"rgba({r},{g},{b},{alpha})"
+
+
+def crisis_paths(paths: dict, styles: dict, window: tuple, p: dict) -> go.Figure:
+    """Growth of 1 through a crisis (rebased just before the shown period); the crisis window is shaded."""
+    fig = go.Figure()
+    for name, w in paths.items():
+        st = styles[name]
+        fig.add_trace(go.Scatter(x=w.index, y=w.values, name=name, mode="lines+markers",
+                                 line=dict(color=st["color"], width=st.get("width", 2), dash=st.get("dash")),
+                                 marker=dict(size=4), hovertemplate="%{y:.3f}"))
+    s0, s1 = window
+    fig.add_vrect(x0=s0 - pd.offsets.MonthEnd(1), x1=s1, fillcolor="rgba(180,71,74,0.10)", line_width=0,
+                  annotation_text="crisis window", annotation_position="top left",
+                  annotation_font=dict(color=p["muted"], size=11))
+    fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
+    return _layout(fig, p, "Growth of 1 (start of view = 1.00)", height=330)
+
+
+def signal_strip(signals: pd.DataFrame, names: dict, p: dict) -> go.Figure:
+    """Which sleeves were invested (1) or in cash (0) in each month: one row per fund."""
+    z = signals.T.to_numpy(dtype=float)
+    labels = [f"{t} · {names.get(t, t).split(' (')[0]}" for t in signals.columns]
+    fig = go.Figure(go.Heatmap(
+        z=z, x=signals.index, y=labels, zmin=0, zmax=1, showscale=False, xgap=2, ygap=3,
+        colorscale=[[0, p["cash"]], [0.5, p["cash"]], [0.5, p["strategy"]], [1, p["strategy"]]],
+        customdata=[["invested" if v == 1 else "in cash" for v in row] for row in z],
+        hovertemplate="%{y}<br>%{x|%b %Y}: %{customdata}<extra></extra>"))
+    fig = _layout(fig, p, "", height=60 + 34 * len(labels))
+    fig.update_layout(hovermode="closest", showlegend=False, margin=dict(l=8, r=8, t=8, b=8))
+    fig.update_yaxes(showgrid=False, autorange="reversed", title=None)
+    return fig
+
+
+def stability_lines(wealth: dict, chosen: int, p: dict) -> go.Figure:
+    """Growth of 1 for each moving-average window, same sample; the paper's 10 months drawn solid."""
+    fig = go.Figure()
+    shades = ["#8DB6DA", "#5B93C8", "#2E68A8", "#1B4673", "#0F2E4F"]
+    for i, (n, w) in enumerate(wealth.items()):
+        fig.add_trace(go.Scatter(x=w.index, y=w.values, name=f"{n} months", mode="lines",
+                                 line=dict(color=shades[i % len(shades)], width=2.6 if n == chosen else 1.4,
+                                           dash=None if n == chosen else "dot"),
+                                 hovertemplate="%{y:.2f}"))
+    fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
+    fig = _layout(fig, p, "Growth of 1, net of costs", height=340)
+    fig.update_layout(legend=dict(entrywidth=110))
+    return fig

@@ -63,3 +63,32 @@ def test_snapshot_round_trip_runs():
     res = core.run(dict(core.DEFAULTS), dl.load_snapshot())
     assert len(res.index) == 228 and res.index[0] == pd.Timestamp("2007-01-31")
     assert res.annual.index.min() == 2007 and res.annual.index.max() == 2025
+
+
+def test_haircut_bands_match_engine_haircut_summary():
+    res = core.run(dict(core.DEFAULTS), fb.synthetic_data())
+    eng = core.monte_carlo(res)["haircut_summary"]
+    mine = core.monte_carlo_haircut(res)["summary"]
+    for k in ("Strategy", core.BENCH_B2):
+        for q in ("p10", "p50", "p90"):
+            assert abs(eng[k][q] - mine[k][q]) < 1e-9
+
+
+def test_crisis_view_and_sma_stability():
+    data = fb.synthetic_data()
+    res = core.run(dict(core.DEFAULTS), data)
+    cv = core.crisis_view(res, "2020-02-01", "2020-03-31")
+    assert cv["in_sample"] and set(cv["returns"]) == {"Strategy", core.BENCH_B1, core.BENCH_B2}
+    assert all(abs(p.iloc[0] - 1.0) < 1e-12 for p in cv["paths"].values())
+    st = core.sma_stability(dict(core.DEFAULTS), data)
+    assert set(st["results"]) == {6, 8, 10, 12}
+    assert len({tuple(r.index) for r in st["results"].values()}) == 1  # one common sample
+
+
+def test_sma_stability_matches_engine_robustness():
+    data = fb.synthetic_data()
+    res = core.run(dict(core.DEFAULTS), data)
+    eng = fb.robustness(res.cfg, data, res.bt)["sma_stability"]
+    mine = core.sma_stability(dict(core.DEFAULTS), data)["results"]
+    for n, r in mine.items():
+        assert abs(eng.loc[f"{n} months", "sharpe"] - r.metrics.loc["sharpe", core.STRATEGY]) < 1e-9
