@@ -3,7 +3,7 @@
 Streamlit app for the group assignment of **2270 Financial Modeling, Nova SBE (Fall 2026), Group BP**:
 Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, Bastian Volkery.
 
-**Live app:** `https://<app-name>.streamlit.app` (added after deployment)
+**Live app:** https://fm-group-bp-backtest.streamlit.app
 **Notebook:** submitted with the investor prospectus (Colab link added here once shared)
 
 ![Overview: assumptions in the sidebar, the six required measures against the benchmark](docs/screenshot-overview.png)
