@@ -692,6 +692,15 @@ that both files are byte-identical and that these defaults reproduce the noteboo
 **Limitations.** A backtest is not a forecast. US-listed proxies; no taxes and no fund fees beyond those already in
 the fund prices; the 10-month rule is famous, so part of its past success may not repeat (publication bias).
 """)
+    try:
+        tl_m = rob_cached(*CACHE_ARGS).get("extra", {}).get("timing_luck")
+    except Exception:  # noqa: BLE001
+        tl_m = None
+    if tl_m is not None and len(tl_m) > 1:
+        dd_base, dd_other = -tl_m["max_drawdown"].iloc[0], -tl_m["max_drawdown"].iloc[1:]
+        st.markdown(f"**Worst fall depends on the rebalancing day.** The {pct(dd_base)} maximum drawdown is the "
+                    f"month-end case; rebalancing on other days of the month gives {pct(dd_other.min())} to "
+                    f"{pct(dd_other.max())} (Robustness tab).")
 
 # ---------------------------------------------------------------- footer
 st.divider()
