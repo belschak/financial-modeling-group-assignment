@@ -6,6 +6,8 @@ Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridol
 **Live app:** `https://<app-name>.streamlit.app` (added after deployment)
 **Notebook:** submitted with the investor prospectus (Colab link added here once shared)
 
+![Overview: assumptions in the sidebar, the six required measures against the benchmark](docs/screenshot-overview.png)
+
 ## What it does
 
 The strategy holds five broad asset classes (US equity, developed ex-US equity, US Treasuries 7-10y, US REITs,
@@ -29,8 +31,20 @@ In the sidebar you change the assumptions and every number recalculates:
 The page shows the six measures the brief requires (annualised average return, volatility, Sharpe ratio, alpha,
 information ratio and beta, the latter not annualised) with plain-English explanations; the growth of 1 for the
 strategy and both benchmarks from the same start date; drawdowns; calendar-year returns; holdings over time;
-turnover, cost drag and breakeven costs (on return and on Sharpe); a 10-year Monte Carlo outlook for 10,000 EUR;
+turnover, cost drag and breakeven costs (on return and on Sharpe); a 10-year Monte Carlo outlook for 10,000 EUR
+(P10/P50/P90, with a cautious variant that halves the historical excess return);
 the indicative PRIIPs risk class; a full metrics table with CSV download; and the method.
+
+Two views go beyond the headline numbers:
+
+- **Crisis replay**: the 2008 financial crisis, the 2011 euro crisis, the 2020 Covid crash, the 2022 rate shock and
+  the February to April 2025 tariff shock. Strategy against both benchmarks through each window, plus a month-by-month
+  strip of which slices were invested or in cash, and the list of switches.
+- **Window stability**: the 6, 8, 10 and 12-month windows side by side on one common sample. It is a check that the
+  result does not hinge on the 10 months from the paper, not a menu: choosing the best-looking window afterwards would
+  be data-snooping.
+
+![Crisis replay: 2008, strategy vs benchmarks and which slices were in cash](docs/screenshot-crisis-replay.png)
 
 ## Same calculations as the notebook
 

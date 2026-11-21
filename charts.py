@@ -139,7 +139,7 @@ def crisis_paths(paths: dict, styles: dict, window: tuple, p: dict) -> go.Figure
                                  marker=dict(size=4), hovertemplate="%{y:.3f}"))
     s0, s1 = window
     fig.add_vrect(x0=s0 - pd.offsets.MonthEnd(1), x1=s1, fillcolor="rgba(180,71,74,0.10)", line_width=0,
-                  annotation_text="crisis window", annotation_position="top left",
+                  annotation_text="crisis window", annotation_position="bottom left",
                   annotation_font=dict(color=p["muted"], size=11))
     fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
     return _layout(fig, p, "Growth of 1 (start of view = 1.00)", height=330)
