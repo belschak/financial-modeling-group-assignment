@@ -48,7 +48,6 @@ REBAL = {"M": "Monthly", "Q": "Quarterly", "A": "Annually", "none": "Never (only
 for k, v in core.DEFAULTS.items():
     if k not in ("start", "end"):
         st.session_state.setdefault(k, list(v) if k == "tickers" else v)
-st.session_state.setdefault("period", (core.DEFAULTS["start"], core.DEFAULTS["end"]))
 st.session_state.setdefault("data_pref", "live")
 
 
@@ -56,7 +55,7 @@ def reset_defaults():
     for k, v in core.DEFAULTS.items():
         if k not in ("start", "end"):
             st.session_state[k] = list(v) if k == "tickers" else v
-    st.session_state["period"] = (core.DEFAULTS["start"], core.DEFAULTS["end"])
+    st.session_state.pop("period", None)  # the slider falls back to its default range
 
 
 # ---------------------------------------------------------------- data + runs (cached)
@@ -130,9 +129,12 @@ with st.sidebar:
              help="EUR: US-listed fund returns converted to euro without currency hedging; cash earns the euro "
                   "3-month rate. USD: no conversion; cash earns the US 3-month T-bill rate. Trade signals always "
                   "use each fund's own USD price.")
-    if st.session_state["period"][1] not in months:
-        st.session_state["period"] = (st.session_state["period"][0], months[-1])
+    # value= makes it a RANGE slider (without it Streamlit treats it as single-value and resets the range).
+    default_period = (core.DEFAULTS["start"], min(core.DEFAULTS["end"], months[-1]))
+    if "period" in st.session_state and any(m not in months for m in st.session_state["period"]):
+        del st.session_state["period"]
     st.select_slider("Backtest period", options=months, key="period",
+                     value=st.session_state.get("period", default_period),
                      help="Earliest start is Jan 2007: the commodity fund (DBC) starts in Feb 2006 and the rule needs "
                           "a full moving-average window first. Jan 2007 is also after the rule was published.")
 
