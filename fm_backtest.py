@@ -612,7 +612,7 @@ def perf_metrics(r: pd.Series, rb: pd.Series | None, rf: pd.Series) -> dict:
                  information_ratio_regression=float(math.sqrt(PERIODS) * reg["alpha"] / reg["resid_std"])
                  if reg["resid_std"] > 1e-12 else np.nan,
                  ann_active_return=float(PERIODS * active.mean()),
-                 hit_rate_vs_benchmark=float((active > 0).mean()))
+                 hit_rate_vs_benchmark=float((active > 0).mean()) if te > 1e-15 else np.nan)
     return m
 
 
@@ -1263,8 +1263,20 @@ def build_results(cfg: dict, data: dict, bt: dict, rob: dict, mc: dict, mot: dic
     rep = data_report(data, cfg)
     rs = rolling_stats(bt["strategy"].net, bt["benchmarks"][prim].net, bt["rf"], cfg["rolling_window"])
     rsb = rolling_stats(bt["benchmarks"][prim].net, bt["benchmarks"][prim].net, bt["rf"], cfg["rolling_window"])
+    import platform
+    versions = dict(python=platform.python_version(), pandas=pd.__version__, numpy=np.__version__)
+    for mod in ("yfinance", "quantstats", "matplotlib"):
+        try:
+            versions[mod] = __import__(mod).__version__
+        except Exception:
+            versions[mod] = None
+    try:
+        sha = engine_sha256()
+    except Exception:
+        sha = None
     out = dict(
-        meta=dict(strategy_name=strat_name, group="BP", engine_version=ENGINE_VERSION,
+        meta=dict(strategy_name=strat_name, group="BP", engine_version=ENGINE_VERSION, engine_sha256=sha,
+                  versions=versions,
                   generated_at=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M UTC"),
                   data_retrieved_at=data["retrieved_at"], base_ccy=cfg["base_ccy"],
                   sample_start=bt["index"][0].strftime("%Y-%m"), sample_end=bt["index"][-1].strftime("%Y-%m"),
