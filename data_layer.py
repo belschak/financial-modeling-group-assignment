@@ -106,6 +106,6 @@ def last_complete_month(data: dict, tickers: list[str]) -> pd.Timestamp:
 def describe(data: dict) -> str:
     src = data["sources"]
     used = sorted(set(src["prices"].values())) if isinstance(src.get("prices"), dict) else [str(src.get("prices"))]
-    px = ", ".join(u.replace("yahoo_chart_api", "Yahoo chart API").replace("yfinance", "Yahoo Finance via yfinance")
-                   for u in used)
+    raw = {"yfinance": "Yahoo Finance via yfinance", "yahoo_chart_api": "Yahoo Finance via chart API"}
+    px = ", ".join(raw.get(u, u) for u in used)  # the engine already returns readable labels; map raw codes only
     return f"prices {px}; EUR rate {src['rf_EUR']}; USD rate {src['rf_USD']}; FX {src['fx']}; retrieved {data['retrieved_at']}"

@@ -4,7 +4,7 @@ Streamlit app for the group assignment of **2270 Financial Modeling, Nova SBE (F
 Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, Bastian Volkery.
 
 **Live app:** https://fm-group-bp-backtest.streamlit.app
-**Notebook:** submitted with the investor prospectus (Colab link added here once shared)
+**Notebook:** `FM-Group-BP-Backtest.ipynb`, submitted on Moodle together with the investor prospectus
 
 ![Overview: assumptions in the sidebar, the six required measures against the benchmark](docs/screenshot-overview.png)
 
@@ -29,7 +29,8 @@ In the sidebar you change the assumptions and every number recalculates:
 | Benchmark for alpha, beta, IR | B1 equal weight 1/n | B1 or B2 (60/40) |
 
 The page shows the six measures the brief requires (annualised average return, volatility, Sharpe ratio, alpha,
-information ratio and beta, the latter not annualised) with plain-English explanations; the growth of 1 for the
+information ratio in both forms, regression and tracking error, and beta, the latter not annualised) with plain-English explanations;
+the largest fall against the client's 10% target (20% hard ceiling); the growth of 1 for the
 strategy and both benchmarks from the same start date; drawdowns; calendar-year returns; holdings over time;
 turnover, cost drag and breakeven costs (on return and on Sharpe); a 10-year Monte Carlo outlook for 10,000 EUR
 (P10/P50/P90, with a cautious variant that halves the historical excess return);
@@ -96,42 +97,14 @@ streamlit run app.py
 
 Python 3.11 to 3.13. Tests: `pip install pytest` then `pytest -q`.
 
-## Deploy on Streamlit Community Cloud (one group member, about 5 minutes)
+## Deployment
 
-Before deploying, decide how graders get access (group decision, after sign-off):
+The live app runs on Streamlit Community Cloud from this repository (branch `main`, main file `app.py`,
+Python 3.13, no secrets); a push to `main` redeploys it. Community Cloud apps sleep after 12 hours without visitors:
+the button "Yes, get this app back up!" wakes the app in a minute or two.
 
-- **(a) Repository and app public** (cleanest). A group member switches this repository to public
-  (Settings, General, Danger Zone, Change visibility), then deploys; apps from public repositories are public.
-- **(b) Repository private, graders invited on GitHub, app public.** Deploy from the private repository, then in the
-  app's **Share** menu choose **"Make this app public"**.
-
-Keep in mind: an account can have only **one private app** at a time, and a private app can only be opened by
-invited viewers, so graders would need invitations. Choose (a) or (b) so the app itself is public.
-
-Steps:
-
-1. Go to `https://share.streamlit.io` and sign in with GitHub. Allow access to this repository when asked
-   (for a private repository, allow private repository access).
-2. Click **Create app**, then **"Yup, I have an app"**.
-3. Repository `belschak/fm-2270-backtest-app`, branch `main`, main file path `app.py`.
-4. App URL: choose a short subdomain, for example `bp-trend-guarded`.
-5. Open **Advanced settings** and choose **Python 3.13**. The Python version is chosen once: changing it later means
-   deleting and redeploying the app. No secrets are needed. Save.
-6. Click **Deploy**. The first build takes a few minutes; then the app downloads the data once (about 15 seconds).
-7. For option (b): **Share**, then **"Make this app public"**.
-8. Put both links (app URL and `https://github.com/belschak/fm-2270-backtest-app`) in the prospectus and the
-   notebook, fill `NOTEBOOK_URL` in `app.py`, and check both links in a private browser window.
-
-Apps on Community Cloud **sleep after 12 hours without visitors**. A visitor wakes one with the button
-"Yes, get this app back up!", which takes a minute or two. Open the app on the morning of grading.
-
-## Updating after the notebook changes
-
-```bash
-python tools/sync_engine.py      # copies the notebook's engine unchanged and prints both SHA-256 hashes
-python tools/make_snapshot.py    # refresh the offline snapshot with the same engine
-pytest -q
-```
+When the notebook's engine changes: `python tools/sync_engine.py` (copies it unchanged and prints both SHA-256
+hashes), `python tools/make_snapshot.py --from-notebook <notebook output folder>`, then `pytest -q`.
 
 ## Files
 
@@ -147,9 +120,7 @@ pytest -q
 
 ## Use of generative AI
 
-An AI assistant (Claude) proposed the strategy and helped write the code of the notebook and this app. The group
-checked the outputs: the app runs the notebook's own engine file (tested byte for byte), its defaults reproduce the
-notebook's results (tested), and every setting was exercised in automated tests and by hand.
+Use of generative AI. We used Claude Code (Anthropic) throughout the project: for research, including proposing the published trend rule we adopted (Faber 2007), for the notebook and app code, and for drafting and laying out this text. We checked all outputs with 23 automated tests, a fresh Colab run, a second, separately written backtest that gives the same headline numbers, and our own review of code, numbers and text against the notebook output.
 
 Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
 future returns.

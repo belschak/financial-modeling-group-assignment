@@ -99,3 +99,18 @@ def test_live_failure_falls_back_to_snapshot_with_notice(monkeypatch):
     monkeypatch.setattr(dlm, "load_live", lambda *a, **k: calls.append(1) or real(*a, **k))
     at.select_slider(key="cost_bps").set_value(25).run()
     assert not at.exception and calls == []
+
+
+def test_both_information_ratios_and_client_target_shown():
+    """D3: regression IR (class definition) and tracking-error IR side by side; D2: 10% target, 20% ceiling."""
+    import json
+    at = _app()
+    md = " ".join(m.value for m in at.markdown)
+    assert "Regression (alpha / residual volatility" in md and "Tracking error (return above" in md
+    assert "worst fall of at most 10%, with 20% as the hard ceiling" in md
+    from conftest import results_json
+    rj = results_json()
+    if rj is not None:
+        s = json.loads(rj.read_text(encoding="utf-8"))["portfolios"]["strategy"]
+        assert _card(at, "Information ratio") == f"{s['information_ratio_regression']:.2f}"
+        assert f"<b>{s['information_ratio']:.2f}</b>" in md

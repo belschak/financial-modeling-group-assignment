@@ -19,7 +19,8 @@ import data_layer as dl
 import fm_backtest as fb
 
 REPO_URL = "https://github.com/belschak/fm-2270-backtest-app"
-NOTEBOOK_URL = ""  # Colab link: filled in by the group once the notebook is shared
+NOTEBOOK_URL = ""  # optional public Colab link; empty = the notebook is the .ipynb submitted with the prospectus
+CLIENT_DD_TARGET, CLIENT_DD_CEILING = 0.10, 0.20  # client's worst-fall target and hard ceiling (prospectus p2, p6)
 GROUP = ("Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, "
          "Bastian Volkery")
 
@@ -320,7 +321,9 @@ if res.sri:
 st.markdown(
     f"**10,000 {ccy}** invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y} would have grown to "
     f"**{10000 * w_s.iloc[-1]:,.0f} {ccy}** by {last:%b %Y} ({bn}: {10000 * w_b.iloc[-1]:,.0f} {ccy}). "
-    f"Largest fall from a previous high: **{-M.loc['max_drawdown', S]:.1%}** ({bn}: {-M.loc['max_drawdown', P]:.1%})."
+    f"Largest fall from a previous high: **{-M.loc['max_drawdown', S]:.1%}** ({bn}: {-M.loc['max_drawdown', P]:.1%}); "
+    f"the client's target is a worst fall of at most {CLIENT_DD_TARGET:.0%}, with {CLIENT_DD_CEILING:.0%} as the "
+    f"hard ceiling."
 )
 st.caption(DISCLAIMER)
 
@@ -345,19 +348,23 @@ HELP = {
               "x sqrt(12). Higher means a better reward for the risk taken.",
     "alpha_ann": "Return beyond what the exposure to the benchmark explains (Jensen's alpha on monthly excess "
                  "returns), x 12. The t-statistic tells whether it is distinguishable from luck (roughly |t| > 2).",
-    "information_ratio": "Average return above the benchmark divided by tracking error (the volatility of that "
-                         "difference), x sqrt(12). How consistently the strategy beats the benchmark.",
+    "information_ratio": "Shown in two forms. Regression form (class definition, W3): alpha / volatility of the "
+                         "regression residuals, x sqrt(12): alpha per unit of risk the benchmark does not explain. "
+                         "Tracking-error form: average return above the benchmark / volatility of that difference, "
+                         "x sqrt(12): how consistently the strategy beats the benchmark's return.",
     "beta": "Sensitivity to the benchmark: covariance / variance of monthly excess returns. Not annualised. "
             "0.4 means it moves about 40% as much as the benchmark.",
 }
 
 # ---------------------------------------------------------------- the six required measures
+IR_REG = M.loc["information_ratio_regression", S] if "information_ratio_regression" in M.index else None
+IR_TE = M.loc["information_ratio", S]
 cards = [
     ("Average return p.a.", pct(M.loc["ann_return", S]), M.loc["ann_return", S] - M.loc["ann_return", P], "pp", "normal", "ann_return"),
     ("Volatility p.a.", pct(M.loc["ann_vol", S]), M.loc["ann_vol", S] - M.loc["ann_vol", P], "pp", "inverse", "ann_vol"),
     ("Sharpe ratio", num(M.loc["sharpe", S]), M.loc["sharpe", S] - M.loc["sharpe", P], "x", "normal", "sharpe"),
     (f"Alpha p.a. vs {bn}", f"{pct(M.loc['alpha_ann', S])} (t = {num(M.loc['alpha_t', S], 1)})", None, "", "off", "alpha_ann"),
-    (f"Information ratio vs {bn}", num(M.loc["information_ratio", S]), None, "", "off", "information_ratio"),
+    ("Information ratio (regression)", num(IR_REG), None, "", "off", "information_ratio"),
     (f"Beta vs {bn}", num(M.loc["beta", S]), None, "", "off", "beta"),
 ]
 grid_rows = [st.columns(3), st.columns(3)]
@@ -368,6 +375,31 @@ for i, (label, value, delta, unit, dcol, key) in enumerate(cards):
         col.metric(label, value, dtxt, delta_color=dcol, help=HELP[key])
     else:
         col.metric(label, value, help=HELP[key])
+
+
+def _ir_reg_line(x):
+    if x is None or pd.isna(x):
+        return "not available for these settings"
+    if x >= 0.5:
+        return "high: a large alpha relative to the risk the benchmark does not explain"
+    if x > 0:
+        return "positive but modest risk-adjusted alpha"
+    return "no positive risk-adjusted alpha"
+
+
+def _ir_te_line(x):
+    if x is None or pd.isna(x):
+        return "not available for these settings"
+    if abs(x) < 0.1:
+        return f"the strategy's return is about the same as {bn}'s"
+    return (f"the strategy's return beats {bn}'s" if x > 0 else f"the strategy's return trails {bn}'s") + \
+        (" consistently" if abs(x) >= 0.5 else " only slightly, relative to how far it deviates")
+
+
+st.markdown(
+    f"<div class='src'>Information ratio in both forms. Regression (alpha / residual volatility, the class "
+    f"definition): <b>{num(IR_REG)}</b>, {_ir_reg_line(IR_REG)}. Tracking error (return above {bn} / volatility "
+    f"of that difference): <b>{num(IR_TE)}</b>, {_ir_te_line(IR_TE)}.</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- tabs
 @contextmanager
@@ -414,7 +446,8 @@ ROWS = [
     ("ann_vol", "Volatility p.a.", pct, True),
     ("sharpe", "Sharpe ratio", num, True),
     ("alpha_ann", f"Alpha p.a. (vs {bn})", pct, True),
-    ("information_ratio", f"Information ratio (vs {bn})", num, True),
+    ("information_ratio_regression", f"Information ratio, regression (alpha / residual volatility, vs {bn})", num, True),
+    ("information_ratio", f"Information ratio, tracking error (vs {bn})", num, True),
     ("beta", f"Beta (vs {bn}, not annualised)", num, True),
     ("alpha_t", "Alpha t-statistic", lambda x: num(x, 1), False),
     ("alpha_t_nw", "Alpha t-statistic (Newey-West)", lambda x: num(x, 1), False),
@@ -424,7 +457,6 @@ ROWS = [
      lambda x: "not yet" if x is None or pd.isna(x) else f"{x:.0f}", False),
     ("worst_12m", "Worst 12 months", pct, False),
     ("tracking_error", f"Tracking error p.a. (vs {bn})", pct, False),
-    ("information_ratio_regression", "Regression IR (alpha / residual volatility)", num, False),
     ("hit_rate_vs_benchmark", f"Share of months beating {bn}", lambda x: pct(x, 0), False),
     ("sortino", "Sortino ratio", num, False),
 ]
@@ -682,7 +714,8 @@ returns plus one class, as the regulation requires.
 mean x 12; volatility = sample standard deviation x sqrt(12); Sharpe = mean excess return / its standard
 deviation x sqrt(12); beta = cov / var of monthly excess returns, **not annualised**; alpha = mean excess return
 minus beta x benchmark mean excess return, x 12, with its OLS t-statistic (Newey-West in the table); information ratio
-= mean of (strategy minus benchmark) / its standard deviation x sqrt(12). Growth curves are cumprod(1 + r) with an
+in two forms: regression = monthly alpha / standard deviation of the regression residuals x sqrt(12) (the class
+definition), and tracking error = mean of (strategy minus benchmark) / its standard deviation x sqrt(12). Growth curves are cumprod(1 + r) with an
 explicit start value of 1.00.
 
 **Same code as the notebook.** All numbers come from `fm_backtest.py` version {fb.ENGINE_VERSION}

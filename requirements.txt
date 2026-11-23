@@ -1,5 +1,5 @@
-# Exact pins = Google Colab's libraries (where the notebook runs) + the notebook's yfinance pin, so app and
-# notebook compute with the same code paths. Streamlit Cloud: choose Python 3.13 in Advanced settings.
+# Exact pins, tested on Streamlit Community Cloud (Python 3.13) and in GitHub Actions on every push.
+# yfinance matches the notebook's pin. matplotlib is not needed: the app draws with Plotly.
 streamlit==1.67.0
 pandas==2.2.3
 numpy==2.1.3
