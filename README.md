@@ -109,5 +109,7 @@ SHA-256 hashes), `python tools/make_snapshot.py --from-notebook <notebook output
 
 Use of generative AI. We used Claude Code (Anthropic) throughout the project: for research, including proposing the published trend rule we adopted (Faber 2007), for the notebook and app code, and for drafting and laying out this text. We checked all outputs with 16 automated tests, a fresh Colab run, a comparison with an earlier, separately written version of our backtest (same Table 1), and our own review of code, numbers and text against the notebook output.
 
+(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 18 pytest tests for the app; "this text" refers to the prospectus.)
+
 Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
 future returns.

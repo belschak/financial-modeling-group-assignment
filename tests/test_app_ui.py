@@ -37,7 +37,7 @@ def test_default_cards_equal_prospectus_table1_and_badge():
     assert _card(at, "Volatility p.a.").value == f"{S['ann_vol']:.1%}"
     assert _card(at, "Sharpe ratio").value == f"{S['sharpe']:.2f}"
     alpha = _card(at, "Alpha p.a. vs B1")
-    assert alpha.value == f"{S['alpha_ann']:.1%}" and alpha.delta == f"t = {S['alpha_t']:.1f}"
+    assert alpha.value == f"{S['alpha_ann']:.1%}" and alpha.delta == f"t = {S['alpha_t']:.2f}"
     assert _card(at, "Beta vs B1").value == f"{S['beta']:.2f}"   # not annualised
 
 

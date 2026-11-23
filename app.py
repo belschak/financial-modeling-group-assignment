@@ -283,7 +283,7 @@ c[0].metric("Average return p.a.", pct(S["ann_return"]), f"{d_ret * 100:+.1f} pp
 c[1].metric("Volatility p.a.", pct(S["ann_vol"]), f"{d_vol * 100:+.1f} pp vs {B}", delta_color="inverse",
             help=HELP["ann_vol"])
 c[2].metric("Sharpe ratio", num(S["sharpe"]), f"{d_sh:+.2f} vs {B}", help=HELP["sharpe"])
-c[3].metric(f"Alpha p.a. vs {B}", pct(S["alpha_ann"]), f"t = {num(S['alpha_t'], 1)}", delta_color="off",
+c[3].metric(f"Alpha p.a. vs {B}", pct(S["alpha_ann"]), f"t = {num(S['alpha_t'])}", delta_color="off",
             delta_arrow="off", help=HELP["alpha_ann"])
 c[4].metric("Information ratio (regression)", num(S["information_ratio_regression"]), help=HELP["ir"])
 c[5].metric(f"Beta vs {B}", num(S["beta"]), help=HELP["beta"])
@@ -360,7 +360,7 @@ ROWS = [
     ("information_ratio_regression", f"Information ratio, regression (alpha / residual volatility, vs {B})", num, True),
     ("information_ratio", f"Information ratio, tracking error (vs {B})", num, True),
     ("beta", f"Beta (vs {B}, not annualised)", num, True),
-    ("alpha_t", "Alpha t-statistic", lambda x: num(x, 1), False),
+    ("alpha_t", "Alpha t-statistic", num, False),
     ("cagr", "Growth rate p.a. (CAGR)", pct, False),
     ("max_drawdown", "Maximum drawdown", pct, False),
     ("months_trough_to_recovery", "Months from bottom back to the old high",
