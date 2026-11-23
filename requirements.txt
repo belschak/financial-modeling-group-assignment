@@ -1,5 +1,5 @@
 # Exact pins, tested on Streamlit Community Cloud (Python 3.13) and in GitHub Actions on every push.
-# yfinance matches the notebook's pin. matplotlib is not needed: the app draws with Plotly.
+# fm_lean.py needs pandas >= 2.2 (resample("ME")); yfinance matches the notebook's pin. Charts use Plotly.
 streamlit==1.67.0
 pandas==2.2.3
 numpy==2.1.3

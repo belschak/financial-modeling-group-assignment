@@ -1,8 +1,8 @@
-"""Shared test helpers: where the notebook's engine and results live.
+"""Shared test helpers: where the notebook's module and results live.
 
-Search order for each file: environment variable, then the repo's notebook/ folder (if the group adds the
-submitted notebook there), then the group's notebook working folder given by FM_NOTEBOOK_DIR or by one line in
-tests/local_notebook_dir.txt (git-ignored). Missing -> test skipped.
+data/results.json is the notebook run's own results file, copied by tools/make_snapshot.py --from-notebook, so the
+consistency tests also run in GitHub Actions. On the group's machine the notebook folder (FM_NOTEBOOK_DIR or one line
+in tests/local_notebook_dir.txt, git-ignored) adds the checks against the live notebook files. Missing -> skipped.
 """
 import os
 import sys
@@ -12,37 +12,32 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 _LOCAL = Path(__file__).with_name("local_notebook_dir.txt")
-_GA = Path(os.environ.get("FM_NOTEBOOK_DIR")
-           or (_LOCAL.read_text(encoding="utf-8").strip() if _LOCAL.exists() else REPO / "notebook"))
+_NB = os.environ.get("FM_NOTEBOOK_DIR") or (_LOCAL.read_text(encoding="utf-8").strip() if _LOCAL.exists() else "")
+NB = Path(_NB) if _NB else None
+
+EXPECTED_SHA = "4b54dbd5fa2b0cf2b34ba8de6a797b821c8787995a82077c0b21066aea522277"  # fm_lean.py lean-1.0 (LF)
 
 
-def first_existing(*cands):
-    for c in cands:
-        if c and Path(c).exists():
-            return Path(c)
-    return None
+def _nb(*parts):
+    p = NB.joinpath(*parts) if NB else None
+    return p if p is not None and p.exists() else None
 
 
-def notebook_engine_file():
-    return first_existing(os.environ.get("FM_ENGINE"), REPO / "notebook" / "fm_backtest.py", _GA / "engine" / "fm_backtest.py")
+def notebook_module_file():
+    return _nb("fm_lean.py")
 
 
 def notebook_ipynb():
-    env = os.environ.get("FM_NOTEBOOK")
-    if env:
-        return first_existing(env)
-    for d in (REPO / "notebook", _GA):
-        if d.exists():
-            nbs = sorted(d.glob("*.ipynb"))
-            if nbs:
-                return nbs[0]
-    return None
+    if NB is None or not NB.exists():
+        return None
+    nbs = sorted(NB.glob("*.ipynb"))
+    return nbs[0] if nbs else None
 
 
-def results_json():
-    return first_existing(os.environ.get("FM_RESULTS"), REPO / "notebook" / "results.json", _GA / "output" / "results.json")
+def notebook_results_json():
+    return _nb("output", "results.json")
 
 
-def notebook_inputs_snapshot():
-    """Inputs the notebook actually used, if its run exported them (exact reproduction)."""
-    return first_existing(os.environ.get("FM_INPUTS"), _GA / "output" / "snapshot_inputs.csv")
+def repo_results_json():
+    p = REPO / "data" / "results.json"
+    return p if p.exists() else None

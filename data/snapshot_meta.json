@@ -1,18 +1,5 @@
 {
- "retrieved_at": "2026-11-21 01:53 UTC",
- "sources": {
-  "prices": {
-   "SPY": "Yahoo Finance via yfinance",
-   "EFA": "Yahoo Finance via yfinance",
-   "IEF": "Yahoo Finance via yfinance",
-   "VNQ": "Yahoo Finance via yfinance",
-   "DBC": "Yahoo Finance via yfinance"
-  },
-  "rf_EUR": "ECB EONIA to 2019-09, then euro short-term rate (EUR STR); monthly average",
-  "rf_USD": "FRED TB3MS, 3-month T-bill, shifted one month (rate known at the start)",
-  "fx": "FRED DEXUSEU (USD per EUR, end of month)",
-  "rf_USD_hedge": "FRED EFFR, US overnight rate, monthly average, no shift (bond hedge carry)"
- },
- "engine_sha256": "ffc29e11f02fc67f8ac678cc760d4a01c2637ba37538679f0ad4db23ddf7a50d",
- "columns": "month-end adjusted close USD per ticker; FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_monthly_shifted (TB3MS, already shifted one month)"
+ "retrieved_at": "2026-11-23 11:15 UTC",
+ "module_sha256": "4b54dbd5fa2b0cf2b34ba8de6a797b821c8787995a82077c0b21066aea522277",
+ "columns": "month-end adjusted close USD per ticker; FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_overnight_monthly (EFFR); *_next_day = close on the first trading day of the next month"
 }

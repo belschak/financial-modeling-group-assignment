@@ -1,4 +1,4 @@
-"""Plotly figures in the shared design tokens (see design-tokens.md), light and dark variants."""
+"""Plotly figures in the prospectus colours (one palette that reads on light and dark)."""
 from __future__ import annotations
 
 import pandas as pd
@@ -10,7 +10,6 @@ import plotly.graph_objects as go
 PALETTE = dict(muted="rgba(128,138,155,1)", strategy="#2E68A8", b1="#C08A2B", b2="#8A94A6",
                loss="#B4474A", grid="rgba(128,138,155,0.22)", paper="rgba(0,0,0,0)",
                assets=["#2E68A8", "#5B93C8", "#8DB6DA", "#C08A2B", "#8C6D46"], cash="rgba(150,165,185,0.45)")
-PALETTES = {"light": PALETTE, "dark": PALETTE}
 FONT = "Inter, -apple-system, Segoe UI, sans-serif"
 
 
@@ -129,48 +128,14 @@ def _rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def crisis_paths(paths: dict, styles: dict, window: tuple, p: dict) -> go.Figure:
-    """Growth of 1 through a crisis (rebased just before the shown period); the crisis window is shaded."""
-    fig = go.Figure()
-    for name, w in paths.items():
-        st = styles[name]
-        fig.add_trace(go.Scatter(x=w.index, y=w.values, name=name, mode="lines+markers",
-                                 line=dict(color=st["color"], width=st.get("width", 2), dash=st.get("dash")),
-                                 marker=dict(size=4), hovertemplate="%{y:.3f}"))
-    s0, s1 = window
-    fig.add_vrect(x0=s0 - pd.offsets.MonthEnd(1), x1=s1, fillcolor="rgba(180,71,74,0.10)", line_width=0,
-                  annotation_text="crisis window", annotation_position="bottom left",
-                  annotation_font=dict(color=p["muted"], size=11))
-    fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
-    return _layout(fig, p, "Growth of 1 (start of view = 1.00)", height=330)
-
-
-def signal_strip(signals: pd.DataFrame, names: dict, p: dict) -> go.Figure:
-    """Which sleeves were invested (1) or in cash (0) in each month: one row per fund."""
-    z = signals.T.to_numpy(dtype=float)
-    labels = list(signals.columns)  # tickers only, so the strip keeps its width on phones
-    fig = go.Figure(go.Heatmap(
-        z=z, x=signals.index, y=labels, zmin=0, zmax=1, showscale=False, xgap=2, ygap=3,
-        colorscale=[[0, p["cash"]], [0.5, p["cash"]], [0.5, p["strategy"]], [1, p["strategy"]]],
-        customdata=[[f"{names.get(t, t).split(' (')[0]}: {'invested' if v == 1 else 'in cash'}" for v in row]
-                    for t, row in zip(labels, z)],
-        hovertemplate="%{y} %{x|%b %Y}<br>%{customdata}<extra></extra>"))
-    fig = _layout(fig, p, "", height=60 + 34 * len(labels))
-    fig.update_layout(hovermode="closest", showlegend=False, margin=dict(l=8, r=8, t=8, b=8))
-    fig.update_yaxes(type="category", showgrid=False, autorange="reversed", title=None, automargin=True)
-    return fig
-
-
-def stability_lines(wealth: dict, chosen: int, p: dict) -> go.Figure:
-    """Growth of 1 for each moving-average window, same sample; the paper's 10 months drawn solid."""
-    fig = go.Figure()
-    shades = ["#8DB6DA", "#5B93C8", "#2E68A8", "#1B4673", "#0F2E4F"]
-    for i, (n, w) in enumerate(wealth.items()):
-        fig.add_trace(go.Scatter(x=w.index, y=w.values, name=f"{n} months", mode="lines",
-                                 line=dict(color=shades[i % len(shades)], width=2.6 if n == chosen else 1.4,
-                                           dash=None if n == chosen else "dot"),
-                                 hovertemplate="%{y:.2f}"))
-    fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
-    fig = _layout(fig, p, "Growth of 1, net of costs", height=340)
-    fig.update_layout(legend=dict(entrywidth=110))
+def rolling_lines(roll: pd.DataFrame, p: dict, bench: str) -> go.Figure:
+    """Rolling 36-month Sharpe ratio and beta of the strategy (fm_lean.rolling), one panel each."""
+    from plotly.subplots import make_subplots
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12,
+                        subplot_titles=("Sharpe ratio, rolling 36 months", f"Beta vs {bench}, rolling 36 months"))
+    for row, col in ((1, "sharpe"), (2, "beta")):
+        fig.add_trace(go.Scatter(x=roll.index, y=roll[col], mode="lines", showlegend=False,
+                                 line=dict(color=p["strategy"], width=2), hovertemplate="%{y:.2f}"), row=row, col=1)
+    fig = _layout(fig, p, "", height=420)
+    fig.update_annotations(font=dict(size=12, color=p["muted"]), x=0, xanchor="left")
     return fig

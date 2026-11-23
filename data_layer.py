@@ -1,12 +1,7 @@
-"""Data layer for the app: the engine's own live download, plus a snapshot fallback.
+"""Data for the app: fm_lean.load_data (the notebook's own download), plus a stored snapshot as fallback.
 
-Live (default): `fm_backtest.load_data()`, i.e. exactly the notebook's download code
-(Yahoo Finance via yfinance, falling back to Yahoo's chart API; FRED key-less CSV for rates and FX;
-ECB Data Portal for the latest EUR rate months).
-
-Snapshot (fallback): `data/snapshot_inputs.csv` + `data/snapshot_meta.json`, the same monthly inputs
-stored once. Used only if Yahoo or FRED refuse the request (Yahoo often rate-limits cloud servers).
-
+The snapshot (data/snapshot_inputs.csv) is the notebook run's own input export, so offline defaults equal the
+notebook exactly. It is used only if Yahoo, ECB or FRED refuse the request (Yahoo often throttles cloud servers).
 No Streamlit import here; the app adds caching.
 """
 from __future__ import annotations
@@ -17,95 +12,55 @@ from pathlib import Path
 
 import pandas as pd
 
-import fm_backtest as fb
+import core
+import fm_lean as fl
 
 DATA_DIR = Path(__file__).parent / "data"
-SNAP_CSV = DATA_DIR / "snapshot_inputs.csv"
-SNAP_META = DATA_DIR / "snapshot_meta.json"
+SNAP_CSV, SNAP_META = DATA_DIR / "snapshot_inputs.csv", DATA_DIR / "snapshot_meta.json"
+SOURCES = "Yahoo Finance (adjusted closes, yfinance), ECB (EONIA, then EUR STR), FRED (EFFR, DEXUSEU)"
+COLS = dict(fx="FX_USDperEUR", rf="RF_EUR_monthly", usd_on="RF_USD_overnight_monthly", fx_next="FX_USDperEUR_next_day")
 
 
-def download_config(end: str | None = None) -> dict:
-    """Engine config used for downloading: the default universe up to the last complete month."""
-    if end is None:
-        end = (pd.Timestamp.today().normalize().replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    return fb.get_config(end=end)
+def last_month_end() -> pd.Timestamp:
+    return pd.Timestamp.today().normalize().replace(day=1) - pd.Timedelta(days=1)
 
 
-def load_live(end: str | None = None) -> dict:
-    # Test hook: FM_SIMULATE_LIVE_FAILURE=1 makes the live download fail, to check the snapshot fallback path.
+def load_live() -> dict:
+    # Test hook: FM_SIMULATE_LIVE_FAILURE=1 makes the download fail, to check the snapshot fallback.
     if os.environ.get("FM_SIMULATE_LIVE_FAILURE") == "1":
-        raise ConnectionError("simulated Yahoo Finance rate limit (FM_SIMULATE_LIVE_FAILURE=1)")
-    data = fb.load_data(download_config(end))
-    data["origin"] = "live"
-    return data
+        raise ConnectionError("simulated Yahoo Finance rate limit")
+    d = fl.load_data(last_month_end().strftime("%Y-%m-%d"), fl.TICKERS)
+    d["origin"] = "live"
+    return d
 
 
-RF_EUR_COL, RF_USD_COL, FX_COL = "RF_EUR_monthly", "RF_USD_monthly_shifted", "FX_USDperEUR"
-RF_HEDGE_COL = "RF_USD_overnight_monthly"       # US overnight rate for the bond hedge (engine >= frozen v2)
-NON_TICKER = (RF_EUR_COL, RF_USD_COL, FX_COL, RF_HEDGE_COL)
-SNAP_DAILY = DATA_DIR / "snapshot_daily.csv"     # daily closes + daily FX: only for the daily SRI / timing checks
+def save_snapshot(d: dict) -> None:
+    """Same table as the notebook's export: month-end prices, FX, rates and the next-day prices."""
+    snap = pd.concat([d["px"], d["fx"].rename(COLS["fx"]), d["rf"].rename(COLS["rf"]), d["usd_on"].rename(COLS["usd_on"]),
+                      d["px_next"].add_suffix("_next_day"), d["fx_next"].rename(COLS["fx_next"])], axis=1)
+    DATA_DIR.mkdir(exist_ok=True)
+    snap.to_csv(SNAP_CSV, float_format="%.10g")
+    SNAP_META.write_text(json.dumps(dict(retrieved_at=d["retrieved_at"], module_sha256=core.SHA), indent=1))
 
 
-def save_snapshot(data: dict, daily: bool = True) -> None:
-    """Store the engine's own snapshot table (fm_backtest.snapshot_frame) plus provenance; optionally the daily
-    prices and FX the engine keeps for the daily risk class and the timing checks."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    df = fb.snapshot_frame(data)
-    df.index.name = "month_end"
-    df.to_csv(SNAP_CSV, float_format="%.12g")
-    meta = dict(first_daily=data["first_daily"], sources=data["sources"], retrieved_at=data["retrieved_at"],
-                n_daily_rows=data.get("n_daily_rows"), engine_version=fb.ENGINE_VERSION,
-                note="fm_backtest.snapshot_frame(load_data(cfg)): month-end USD prices, FX, monthly rf decimals.")
-    SNAP_META.write_text(json.dumps(meta, indent=2))
-    if daily:
-        save_daily(data)
-
-
-def save_daily(data: dict) -> None:
-    if data.get("daily_prices") is None or data.get("fx_daily") is None:
-        return
-    d = data["daily_prices"].copy()
-    d["FX_USDperEUR_daily"] = data["fx_daily"].reindex(d.index)
-    d.index.name = "date"
-    d.to_csv(SNAP_DAILY, float_format="%.8g")
-
-
-def load_snapshot(csv: Path = SNAP_CSV, meta_path: Path = SNAP_META, daily_csv: Path | None = SNAP_DAILY) -> dict:
+def load_snapshot(csv: Path = SNAP_CSV, meta: Path = SNAP_META) -> dict:
     df = pd.read_csv(csv, index_col=0, parse_dates=True)
-    meta = json.loads(meta_path.read_text())
-    idx = pd.DatetimeIndex(df.index)
-    tick = [c for c in df.columns if c not in NON_TICKER]
-    data = dict(
-        prices_usd=df[tick].set_axis(idx),
-        fx_usd_per_eur=df[FX_COL].set_axis(idx),
-        rf={"EUR": df[RF_EUR_COL].set_axis(idx), "USD": df[RF_USD_COL].set_axis(idx)},
-        rf_hedge_usd=df[RF_HEDGE_COL].set_axis(idx) if RF_HEDGE_COL in df else None,
-        first_daily=meta.get("first_daily", {t: df[t].first_valid_index().strftime("%Y-%m-%d") for t in tick}),
-        sources=meta["sources"], retrieved_at=meta["retrieved_at"],
-        n_daily_rows=meta.get("n_daily_rows"), origin="snapshot", daily_prices=None, fx_daily=None,
-    )
-    if daily_csv is not None and Path(daily_csv).exists():
-        d = pd.read_csv(daily_csv, index_col=0, parse_dates=True)
-        data["daily_prices"] = d[[c for c in d.columns if c in tick]]
-        data["fx_daily"] = d["FX_USDperEUR_daily"].dropna()
-    return data
+    nxt = [c for c in df.columns if c.endswith("_next_day") and c != COLS["fx_next"]]
+    tick = [c for c in df.columns if c not in COLS.values() and c not in nxt]
+    return dict(px=df[tick], px_next=df[nxt].rename(columns=lambda c: c.removesuffix("_next_day")),
+                **{k: df[c] for k, c in COLS.items()},
+                retrieved_at=json.loads(meta.read_text())["retrieved_at"], origin="snapshot")
 
 
 def snapshot_available() -> bool:
     return SNAP_CSV.exists() and SNAP_META.exists()
 
 
-def last_complete_month(data: dict, tickers: list[str]) -> pd.Timestamp:
-    """Latest month-end for which every input needed by the backtest exists."""
-    ends = [data["prices_usd"][t].last_valid_index() for t in tickers]
-    ends += [data["fx_usd_per_eur"].last_valid_index(), data["rf"]["EUR"].last_valid_index(),
-             data["rf"]["USD"].last_valid_index()]
+def last_complete_month(d: dict, next_day: bool = False) -> pd.Timestamp:
+    """Latest month-end for which every input of the backtest exists (next-day trading needs one more day)."""
+    keys = ["px", "fx", "rf", "usd_on"] + (["px_next", "fx_next"] if next_day else [])
+    ends = []
+    for k in keys:
+        x = d[k].dropna(how="any") if isinstance(d[k], pd.DataFrame) else d[k].dropna()
+        ends.append(x.index[-1])
     return min(ends)
-
-
-def describe(data: dict) -> str:
-    src = data["sources"]
-    used = sorted(set(src["prices"].values())) if isinstance(src.get("prices"), dict) else [str(src.get("prices"))]
-    raw = {"yfinance": "Yahoo Finance via yfinance", "yahoo_chart_api": "Yahoo Finance via chart API"}
-    px = ", ".join(raw.get(u, u) for u in used)  # the engine already returns readable labels; map raw codes only
-    return f"prices {px}; EUR rate {src['rf_EUR']}; USD rate {src['rf_USD']}; FX {src['fx']}; retrieved {data['retrieved_at']}"
