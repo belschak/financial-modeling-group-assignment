@@ -1,5 +1,5 @@
 {
- "retrieved_at": "2026-11-23 11:23 UTC",
- "module_sha256": "4b54dbd5fa2b0cf2b34ba8de6a797b821c8787995a82077c0b21066aea522277",
+ "retrieved_at": "2026-11-23 12:02 UTC",
+ "module_sha256": "5ec1d9a4c10c34db84e8bc8349b94c09227da7606d7762abda94fea80d4eedf2",
  "columns": "month-end adjusted close USD per ticker; FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_overnight_monthly (EFFR); *_next_day = close on the first trading day of the next month"
 }

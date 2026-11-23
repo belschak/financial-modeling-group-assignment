@@ -15,7 +15,7 @@ _LOCAL = Path(__file__).with_name("local_notebook_dir.txt")
 _NB = os.environ.get("FM_NOTEBOOK_DIR") or (_LOCAL.read_text(encoding="utf-8").strip() if _LOCAL.exists() else "")
 NB = Path(_NB) if _NB else None
 
-EXPECTED_SHA = "4b54dbd5fa2b0cf2b34ba8de6a797b821c8787995a82077c0b21066aea522277"  # fm_lean.py lean-1.0 (LF)
+EXPECTED_SHA = "5ec1d9a4c10c34db84e8bc8349b94c09227da7606d7762abda94fea80d4eedf2"  # fm_lean.py lean-1.1 (LF)
 
 
 def _nb(*parts):

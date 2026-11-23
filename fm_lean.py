@@ -1,19 +1,19 @@
-# %% [lean 1/4] settings and data (APIs as in the W3 lecture)
+# %% [lean 1/3] settings and data (APIs as in the W3 lecture)
 """fm_lean: the backtest behind Group BP's prospectus, in the style of the course notebooks (W3-W5).
 
 Used by the Colab notebook (written to disk with %%writefile) and imported unchanged by the Streamlit app.
+Analysis only: chart style and the export for the prospectus layout live in the notebook, not here.
 Conventions: monthly simple returns; a position decided at the end of month t-1 earns the return of month t
 (shift(1)); mean x12, volatility x sqrt(12), Sharpe and IR x sqrt(12), alpha x12, beta not annualised.
 """
 import io
-import re
 import time
 
 import numpy as np
 import pandas as pd
 import requests
 
-VERSION = "lean-1.0"
+VERSION = "lean-1.1"
 TICKERS = ["SPY", "EFA", "IEF", "VNQ", "DBC"]   # US equity, developed ex-US equity, US Treasuries 7-10y, US REITs, commodities
 B2_WEIGHTS = {"SPY": 0.36, "EFA": 0.24, "IEF": 0.40}  # classic 60/40 (bonds hedged like the strategy's)
 UCITS = {  # how an EU retail fund would implement each sleeve (justETF, 20.11.2026); TER as a decimal
@@ -106,7 +106,7 @@ def load_data(end, tickers=TICKERS):
                 retrieved_at=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M UTC"))
 
 
-# %% [lean 2/4] the backtest (Lecture 4.2 style: pct_change, rolling, shift, (w * r).sum)
+# %% [lean 2/3] the backtest (Lecture 4.2 style: pct_change, rolling, shift, (w * r).sum)
 def eur_returns(d, next_day=False, hedge=("IEF",)):
     """Monthly returns of every ticker in EUR; the bond sleeve is hedged (USD return + EUR rate - USD rate)."""
     px, fx = (d["px_next"], d["fx_next"]) if next_day else (d["px"], d["fx"])
@@ -154,7 +154,7 @@ def at_cost(bt, name, cost_bps):
     return (1 - cost_bps / 1e4 * p["traded"]) * (1 + p["gross"]) - 1
 
 
-# %% [lean 3/4] performance measures (W3 3.3-3.5), robustness and Monte Carlo (W5 5.3)
+# %% [lean 3/3] performance measures (W3 3.3-3.5), robustness and Monte Carlo (W5 5.3)
 def wealth(r):
     """Growth of 1 with a start row one month before the first return, so every series starts at exactly 1."""
     return pd.concat([pd.Series([1.0], index=[r.index[0] - pd.offsets.MonthEnd(1)]), (1 + r).cumprod()])
@@ -257,92 +257,3 @@ def monte_carlo(returns, n_sim=10_000, months=120, initial=10_000, seed=2270):
         summary["prob_first_beats_second"] = float((paths[:, -1, 0] > paths[:, -1, 1]).mean())
     return dict(summary=summary, bands=bands, n_sim=n_sim, months=months, initial=initial, seed=seed,
                 columns=list(returns.columns))
-
-
-# %% [lean 4/4] figures (one calm style shared with the prospectus) and export
-NAVY, OCHRE, SLATE, INK, LIGHT, GRID = "#1F4E79", "#C08A2B", "#8A94A6", "#14213D", "#DCE6F0", "#E6E9EF"
-SIZES = {"F1": (170, 78), "F2": (170, 42), "F3": (82, 56), "F4": (82, 56), "F5": (82, 56), "F7": (82, 56), "F9": (170, 30)}
-SOURCE = "Source: Yahoo Finance, ECB, FRED; group calculations. Simulated (back-tested) results."
-
-
-def style():
-    import matplotlib as mpl
-    mpl.rcParams.update({"font.family": "DejaVu Sans", "font.size": 7, "axes.labelsize": 7, "xtick.labelsize": 7,
-                         "ytick.labelsize": 7, "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True,
-                         "axes.grid.axis": "y", "grid.color": GRID, "grid.linewidth": 0.5, "axes.linewidth": 0.5,
-                         "axes.edgecolor": INK, "text.color": INK, "axes.labelcolor": INK, "xtick.color": INK,
-                         "ytick.color": INK, "svg.fonttype": "none", "legend.frameon": False})
-
-
-def pct_axis(ax, dec=0):
-    from matplotlib.ticker import FuncFormatter
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v * 100:.{dec}f}%".replace("-", "−")))
-
-
-def end_labels(ax, items, gap=0.10):
-    """Labels at the right end of each line instead of a legend, pushed apart so they never touch."""
-    ax.get_ylim()                                    # forces autoscaling, so the data-to-axes transform is final
-    to_axes = ax.transAxes.inverted()
-    x = ax.get_xlim()[1]
-    pts = sorted((to_axes.transform(ax.transData.transform((x, y)))[1], txt, c) for y, txt, c in items)
-    ys = [p[0] for p in pts]
-    for i in range(1, len(ys)):
-        ys[i] = max(ys[i], ys[i - 1] + gap)
-    shift = max(0, ys[-1] - 0.98)
-    for y, (_, txt, c) in zip(ys, pts):
-        ax.annotate(txt.replace("-", "−"), xy=(1.01, y - shift), xycoords="axes fraction", color=c,
-                    fontsize=7, fontweight="bold", va="center", annotation_clip=False)
-
-
-def figure(fid, nrows=1):
-    import matplotlib.pyplot as plt
-    style()
-    w, h = SIZES[fid]
-    return plt.subplots(nrows, 1, figsize=(w / 25.4, h / 25.4), sharex=True)
-
-
-def finish(fig, source=True):
-    bottom = 0
-    if source:                                       # one line on wide charts, two on the narrow ones
-        text = SOURCE if fig.get_figwidth() * 25.4 > 120 else SOURCE.replace("calculations. ", "calculations.\n")
-        fig.text(0.01, 0.01, text, fontsize=6, color=SLATE, ha="left", va="bottom", linespacing=1.3)
-        bottom = (text.count("\n") + 1) * 8.5 / (fig.get_figheight() * 72)
-    fig.tight_layout(rect=(0, bottom, 1, 1), pad=0.3)
-    fig.canvas.draw()                                # end labels sit outside the axes: shrink the axes until they fit
-    fw = fig.get_window_extent().width
-    right = max([t.get_window_extent(fig.canvas.get_renderer()).x1 for a in fig.axes for t in a.texts] + [0])
-    if right > 0.985 * fw:
-        fig.subplots_adjust(right=fig.subplotpars.right - (right - 0.985 * fw) / fw)
-    return fig
-
-
-def save(fig, fid, outdir="output/figures"):
-    """SVG for print (transparent, text kept as text, Inter first) and PNG for screens."""
-    import os
-    os.makedirs(outdir, exist_ok=True)
-    svg = f"{outdir}/{fid}.svg"
-    fig.savefig(svg, format="svg", transparent=True, metadata={"Date": None})
-    fig.savefig(f"{outdir}/{fid}.png", dpi=200)
-    with open(svg, encoding="utf-8") as f:
-        txt = re.sub(r"font-family: ?'DejaVu Sans'", "font-family:Inter,'DejaVu Sans',Arial,sans-serif", f.read())
-    with open(svg, "w", encoding="utf-8", newline="\n") as f:
-        f.write(txt)
-
-
-def to_json(x):
-    """pandas / numpy objects -> plain JSON types (NaN -> None)."""
-    if isinstance(x, dict):
-        return {str(k): to_json(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
-        return [to_json(v) for v in x]
-    if isinstance(x, pd.DataFrame):
-        return to_json(x.to_dict(orient="index"))
-    if isinstance(x, pd.Series):
-        return to_json(x.to_dict())
-    if isinstance(x, (np.integer, np.bool_)):
-        return x.item()
-    if isinstance(x, (float, np.floating)):
-        return None if not np.isfinite(x) else float(x)
-    if isinstance(x, pd.Timestamp):
-        return x.strftime("%Y-%m")
-    return x

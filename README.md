@@ -40,8 +40,8 @@ that halves the historical return above cash); and the method.
 
 ## Same calculations as the notebook
 
-All numbers come from **`fm_lean.py` version lean-1.0, SHA-256
-`4b54dbd5fa2b0cf2b34ba8de6a797b821c8787995a82077c0b21066aea522277`**, the module the submitted notebook writes with
+All numbers come from **`fm_lean.py` version lean-1.1, SHA-256
+`5ec1d9a4c10c34db84e8bc8349b94c09227da7606d7762abda94fea80d4eedf2`**, the module the submitted notebook writes with
 `%%writefile` and runs, copied here byte for byte. The app never re-implements a calculation: `core.py` only turns
 the sidebar into calls of `fm_lean.backtest`, `table`, `at_cost`, `breakeven`, `rolling`, `calendar_years` and
 `monte_carlo`. The footer and the Method tab print the module version, its SHA-256 and the git commit of the running
