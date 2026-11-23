@@ -26,9 +26,34 @@ COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 LIVE_RETRY_AFTER_S = 600  # after a failed live download, use the snapshot for 10 minutes before trying again
 
 st.set_page_config(page_title="BP Trend-Guarded Multi-Asset | Backtest", page_icon="📈", layout="wide")
+# Light theme on a viewer's first visit; the menu switch (System / Light / Dark) keeps working and wins once used.
+# Streamlit has no config option for this and stores "System" on its first load, so once per browser (own marker
+# key) we set its theme choice (localStorage key from Streamlit 1.67 storageUtils.ts) to Light. Any later choice
+# in the menu is never touched. If the key ever changes, the app simply follows the system setting.
+st.html(
+    """<script>
+    (function () {
+      try {
+        var ls = window.localStorage, mark = "bp-theme-default-v1";
+        if (ls.getItem(mark) !== null) return;
+        ls.setItem(mark, "1");
+        var key = "stActiveTheme-" + window.location.pathname + "-v2";
+        var cur = ls.getItem(key);
+        if (cur === null || cur === JSON.stringify("System")) {
+          ls.setItem(key, JSON.stringify("Light"));
+          if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            window.location.reload();
+          }
+        }
+      } catch (e) { /* storage blocked: keep the system theme */ }
+    })();
+    </script>""",
+    unsafe_allow_javascript=True,
+)
 st.markdown(
     """
     <style>
+      [data-testid="stElementContainer"]:has(> [data-testid="stHtml"] script) { display: none; }
       [data-testid="stMetricValue"], [data-testid="stDataFrame"] { font-variant-numeric: tabular-nums; }
       [data-testid="stMetric"] { border: 1px solid rgba(128,138,155,.28); border-radius: .4rem; padding: .7rem .9rem .5rem; }
       [data-testid="stMetricLabel"] p { font-size: .85rem; opacity: .85; }
