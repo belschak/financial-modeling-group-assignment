@@ -2398,8 +2398,8 @@
   "average_sell_trigger": 0.113
  },
  "links": {
-  "app": "https://fm-group-bp-backtest.streamlit.app",
-  "repo": "https://github.com/belschak/fm-2270-backtest-app"
+  "app": "https://financial-modeling-group-bp.streamlit.app",
+  "repo": "https://github.com/belschak/financial-modeling-group-assignment"
  },
  "prospectus_numbers": {
   "headline_next_day": {

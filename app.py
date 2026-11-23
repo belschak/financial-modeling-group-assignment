@@ -18,7 +18,7 @@ import core
 import data_layer as dl
 import fm_lean as fl
 
-REPO_URL = "https://github.com/belschak/fm-2270-backtest-app"
+REPO_URL = "https://github.com/belschak/financial-modeling-group-assignment"
 GROUP = ("Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, "
          "Bastian Volkery")
 DISCLAIMER = "Hypothetical back-tested results. Past performance does not predict future returns."
