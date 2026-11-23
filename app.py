@@ -195,14 +195,14 @@ is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
 st.title(core.STRATEGY)
 st.markdown(
     "<p class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
-    "portfolio only while its price is above its 10-month average; otherwise its slice waits in euro cash. "
+    f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro cash. "
     "Designed for cautious euro-area savers about 10 years from retirement.</p>", unsafe_allow_html=True)
 h1, h2 = st.columns([1, 1], vertical_alignment="center")
 with h1:
     if is_default:
         st.badge("Defaults: matches prospectus Table 1", icon=":material/verified:", color="green")
     else:
-        st.badge("Custom assumptions: numbers differ from the prospectus", icon=":material/tune:", color="orange")
+        st.badge("Custom assumptions: differs from prospectus", icon=":material/tune:", color="orange")
 if data_warning:
     st.warning(data_warning, icon=":material/cloud_off:")
 for n in notes:

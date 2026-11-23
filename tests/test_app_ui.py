@@ -93,6 +93,7 @@ def test_long_window_moves_the_start_instead_of_failing():
     at.radio(key="lag").set_value(2).run()
     assert not at.exception and not at.error
     assert any("Start moved to" in i.value for i in at.info)
+    assert "above its 12-month average" in _md(at)   # intro follows the window slider
 
 
 def test_extreme_settings_never_show_a_traceback():
