@@ -17,6 +17,8 @@ import charts
 import core
 import data_layer as dl
 import fm_lean as fl
+import glass
+import replay
 
 REPO_URL = "https://github.com/belschak/financial-modeling-group-assignment"
 GROUP = ("Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, "
@@ -330,6 +332,10 @@ st.markdown(
 
 def html(s: str):
     st.markdown(s, unsafe_allow_html=True)
+
+
+html(glass.CSS)
+st.html(glass.JS, unsafe_allow_javascript=True)
 
 
 def chart_head(title: str, sub: str | None = None):
@@ -683,6 +689,31 @@ html(f"<div class='foot-n'>Information ratio in both forms. Regression (alpha / 
      f"Tracking error (return above {B} / volatility of that difference): <b>{num(S['information_ratio'])}</b>, "
      f"{ir_te_line(S['information_ratio'])}. Beta is not annualised.</div>")
 
+SRC = "Source: Yahoo Finance (adjusted close, dividends reinvested), ECB, FRED; group calculations."
+
+
+def source(text: str):
+    html(f"<div class='src line'>{text}</div>")
+
+
+# ---------------------------------------------------------------- backtest replay (display only, fm_lean outputs)
+html(replay.CSS)
+html("<div class='ch rp-h'><div class='k'>Backtest replay</div><div class='ch-t'>Watch the rule work, month by month</div>"
+     f"<div class='ch-s'>Press play, pick a crisis or drag the timeline. Each month the five lights show which funds closed "
+     f"above their {ui['sma']}-month average and are held; the others wait in euro cash. Same backtest as every number "
+     "on this page.</div></div>")
+try:
+    html(replay.root(replay.payload(
+        bt, data, ui["tickers"], core.NAMES, ui["sma"], ui["lag"], B, BL,
+        dict(strategy=pal["strategy"], bench=pal["b1"] if B == "B1" else pal["b2"], ochre=pal["b1"], loss=pal["loss"],
+             assets=pal["assets"]))))
+    st.html(replay.script(), unsafe_allow_javascript=True)
+except Exception as e:  # noqa: BLE001  (the replay is optional; the page keeps working)
+    st.info(f"The replay cannot be shown with these settings ({e}).", icon=":material/info:")
+source(f"{SRC} Value of 10,000 EUR net of costs; lights = holdings of each month (decided {ui['lag']} month(s) before at "
+       f"the month-end close). {DISCLAIMER}")
+
+
 @contextmanager
 def guard(view: str):
     """A failing view shows a short notice instead of a traceback; the other tabs keep working."""
@@ -695,13 +726,6 @@ def guard(view: str):
 t_perf, t_table, t_hold, t_cost, t_mc, t_method = st.tabs(
     ["Performance", "All metrics", "Holdings", "Costs", "10-year outlook", "Method"])
 CFG = {"displayModeBar": False}
-SRC = "Source: Yahoo Finance (adjusted close, dividends reinvested), ECB, FRED; group calculations."
-
-
-def source(text: str):
-    html(f"<div class='src line'>{text}</div>")
-
-
 with t_perf, guard("This view"):
     w = {LBL_S: fl.wealth(net["Strategy"])}
     chart_head("Growth of 1 EUR, net of costs",

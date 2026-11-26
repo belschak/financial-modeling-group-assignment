@@ -17,7 +17,7 @@ FONT = "Inter, -apple-system, Segoe UI, sans-serif"
 
 def _layout(fig: go.Figure, p: dict, ytitle: str, height: int = 380, yfmt: str | None = None, log: bool = False):
     fig.update_layout(
-        height=height, margin=dict(l=4, r=8, t=40, b=4),
+        height=height, margin=dict(l=18, r=22, t=46, b=14),
         paper_bgcolor=p["paper"], plot_bgcolor=p["paper"],
         font=dict(family=FONT, size=12),
         hovermode="x unified",
@@ -56,7 +56,7 @@ def cumulative(wealth: dict[str, pd.Series], styles: dict[str, dict], p: dict, l
                            font=dict(color=col, size=11))
     fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
     fig = _layout(fig, p, "Growth of 1 (start = 1.00)", log=log)
-    fig.update_layout(margin=dict(r=44))
+    fig.update_layout(margin=dict(r=58))
     return fig
 
 
