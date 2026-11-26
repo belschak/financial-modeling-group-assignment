@@ -1,11 +1,10 @@
 {
  "meta": {
   "strategy_name": "BP Trend-Guarded Multi-Asset",
-  "strategy_variant": "Strategy 2",
   "group": "BP",
   "is_mock": false,
   "engine_version": "lean-2.0",
-  "engine_sha256": "c1ace3ff4f63c3d72eb1fe9cdb09d244b3a11dba407fd93d3c30d8ac42836f7f",
+  "engine_sha256": "a75c318a096da7c61624d16748e38f08ea166399cc0fc28a93feed9fa8a1da83",
   "versions": {
    "pandas": "3.0.3",
    "numpy": "2.4.6",
@@ -13,8 +12,8 @@
    "matplotlib": "3.11.0",
    "python": "3.14.6"
   },
-  "generated_at": "2026-11-26 16:27 UTC",
-  "data_retrieved_at": "2026-11-26 16:27 UTC",
+  "generated_at": "2026-11-26 16:57 UTC",
+  "data_retrieved_at": "2026-11-26 16:57 UTC",
   "base_ccy": "EUR",
   "sample_start": "2005-01",
   "sample_end": "2025-12",
@@ -53,7 +52,7 @@
     "month_end_prices_from": "2004-03",
     "month_end_prices_to": "2006-01",
     "returns_in_sample": 14,
-    "proxy_name": "S&P GSCI commodity index (Yahoo ^SPGSCI)",
+    "proxy_name": "S&P GSCI index level (Yahoo ^SPGSCI; no futures roll or collateral yield)",
     "used_for": "month-end prices before the fund's first price, chained at that price"
    },
    {
@@ -87,7 +86,7 @@
     "EFA": "Yahoo Finance via yfinance",
     "IEF": "Yahoo Finance via yfinance",
     "XLU": "Yahoo Finance via yfinance",
-    "DBC": "Yahoo Finance via yfinance; before 2006-02-06: S&P GSCI commodity index (Yahoo ^SPGSCI)",
+    "DBC": "Yahoo Finance via yfinance; before 2006-02-06: S&P GSCI index level (Yahoo ^SPGSCI; no futures roll or collateral yield)",
     "GLD": "Yahoo Finance via yfinance; before 2004-11-18: gold futures, front month (Yahoo GC=F)"
    },
    "B3": "Yahoo Finance via yfinance: iShares Core MSCI World UCITS ETF USD (Acc) (EUNL.DE, EUR) from 2009-11; before: MSCI World price index (^990100-USD-STRD) + measured gap 1.67% a year",
@@ -96,7 +95,7 @@
    "rf_USD_hedge": "FRED EFFR, US overnight rate, monthly average, no shift (bond hedge carry)",
    "ucits": "justETF, 20.11.2026 (XLU, GLD and B3 funds: 26.11.2026)"
   },
-  "cleaning": "Daily adjusted closes taken on the last trading day of each month; no gaps filled inside a fund's history. 252 monthly returns Jan 2005 to Dec 2025 for all 6 assets, 0 missing values, no rows dropped. Before launch: DBC uses the S&P GSCI (14 monthly returns), GLD gold futures (warm-up prices only).",
+  "cleaning": "Daily adjusted closes taken on the last trading day of each month; no gaps filled inside a fund's history. 252 monthly returns Jan 2005 to Dec 2025 for all 6 assets, 0 missing values, no rows dropped. Before launch: DBC uses the S&P GSCI index level (14 monthly returns), GLD gold futures (warm-up prices only).",
   "config": {
    "start": "2005-01-01",
    "end": "2025-12-31",
@@ -1135,7 +1134,7 @@
      "max_drawdown": -0.5170958273883945
     }
    },
-   "lennart_check": {
+   "group_member_check": {
     "cagr": 0.06081391368194766,
     "ann_vol": 0.053923592113925944,
     "sharpe": 0.9607360608457141,

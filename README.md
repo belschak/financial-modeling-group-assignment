@@ -50,7 +50,7 @@ The page follows the viewer's theme: light on the white template, dark with the 
 ## Same calculations as the notebook
 
 All numbers come from **`fm_lean.py` version lean-2.0, SHA-256
-`c1ace3ff4f63c3d72eb1fe9cdb09d244b3a11dba407fd93d3c30d8ac42836f7f`**, the module the notebook writes with
+`a75c318a096da7c61624d16748e38f08ea166399cc0fc28a93feed9fa8a1da83`**, the module the notebook writes with
 `%%writefile` and runs, copied here byte for byte. The app never re-implements a calculation: `core.py` only turns
 the sidebar into calls of `fm_lean.backtest`, `table`, `at_cost`, `breakeven`, `summary_row`, `rolling`,
 `calendar_years` and `monte_carlo`, and slices the net returns over the notebook's crisis and bull-market windows with
