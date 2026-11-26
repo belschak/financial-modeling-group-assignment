@@ -491,7 +491,7 @@ if len(ui["tickers"]) >= 2:
         ui["start"] = first_ok.strftime("%Y-%m")
 if ui["next_day"] and core.month_end(ui["end"]) > dl.last_complete_month(data, next_day=True):
     ui["end"] = dl.last_complete_month(data, next_day=True).strftime("%Y-%m")
-    notes.append(f"End moved to {core.month_end(ui['end']):%b %Y}: next-day trading needs the first day of the next month.")
+    notes.append(f"End moved to {core.month_end(ui['end']):%b %Y}: trading one day after the month-end signal needs the first trading day of the next month.")
 is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
 WTS = core.weights(ui["tickers"]) if ui["tickers"] else {}
 
