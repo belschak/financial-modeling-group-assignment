@@ -509,7 +509,7 @@ MAST = ("<div class='mh-ctx'><span>Hypothetical fund</span><span>Multi-asset tre
         f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
         f"<div class='lede'>{SLEEVES} At every month-end a slice stays invested only while its price is above its "
         f"{ui['sma']}-month average; otherwise it waits in euro cash. Built for cautious euro-area savers about 10 years "
-        "from retirement who cannot sit through a 25% fall.</div>"
+        f"from retirement who cannot sit through a fall of more than {core.CLIENT_DD_CEILING:.0%}.</div>"
         f"<div class='mh-meta'>{status}<span class='st live{'' if LIVE else ' snap'}'><i></i>"
         f"{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
 # The stage (follows the theme): masthead now, completed with the crash-protection view once the backtest has run.
