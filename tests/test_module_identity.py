@@ -16,7 +16,7 @@ def _sha(path):
 def test_fm_lean_sha_equals_results_json_and_handoff():
     rj = json.loads(repo_results_json().read_text(encoding="utf-8"))
     assert _sha(REPO / "fm_lean.py") == core.SHA == EXPECTED_SHA == rj["meta"]["engine_sha256"]
-    assert rj["meta"]["engine_version"] == "lean-1.1"
+    assert rj["meta"]["engine_version"] == "lean-2.0"
     assert b"\r\n" not in (REPO / "fm_lean.py").read_bytes()   # LF, as in the notebook folder
 
 

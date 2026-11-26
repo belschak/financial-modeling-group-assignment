@@ -15,7 +15,7 @@ _LOCAL = Path(__file__).with_name("local_notebook_dir.txt")
 _NB = os.environ.get("FM_NOTEBOOK_DIR") or (_LOCAL.read_text(encoding="utf-8").strip() if _LOCAL.exists() else "")
 NB = Path(_NB) if _NB else None
 
-EXPECTED_SHA = "5ec1d9a4c10c34db84e8bc8349b94c09227da7606d7762abda94fea80d4eedf2"  # fm_lean.py lean-1.1 (LF)
+EXPECTED_SHA = "c1ace3ff4f63c3d72eb1fe9cdb09d244b3a11dba407fd93d3c30d8ac42836f7f"  # fm_lean.py lean-2.0 (LF)
 
 
 def _nb(*parts):
@@ -28,14 +28,18 @@ def notebook_module_file():
 
 
 def notebook_ipynb():
+    """The notebook built from the current module: build/ while the new version waits for its final Colab run."""
     if NB is None or not NB.exists():
         return None
-    nbs = sorted(NB.glob("*.ipynb"))
-    return nbs[0] if nbs else None
+    for folder in (NB / "build", NB):
+        nbs = sorted(folder.glob("*.ipynb"))
+        if nbs:
+            return nbs[0]
+    return None
 
 
 def notebook_results_json():
-    return _nb("output", "results.json")
+    return _nb("build", "output", "results.json") or _nb("output", "results.json")
 
 
 def repo_results_json():

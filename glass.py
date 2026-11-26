@@ -220,105 +220,188 @@ JS = """<script>
 })();
 </script>"""
 
-# Round 3, "obsidian stage": the masthead and the replay sit on a dark, lit stage in both themes (Apple-style dark
-# sections on a light page); the six measures become a bento of glass cards, each with a small picture of the same
-# fm_lean output. Scroll reveals use the CSS view timeline (no script; browsers without it simply show everything).
+# Round 4, "stage": the masthead and the replay sit on a lit stage that follows the theme: a bright, airy panel on the
+# white template in light mode, the obsidian stage in dark mode. Every colour inside comes from the tokens below, so
+# the two looks cannot drift apart. The stage leads with crash protection: the worst fall of the strategy against all
+# three benchmarks and the underwater curve of each, month by month. The six measures are a bento of glass cards.
+# Scroll reveals use the CSS view timeline (no script; browsers without it simply show everything).
 STAGE = """
 <style>
-  .stApp { --c-s: #2E68A8; --c-b1: #C08A2B; --c-b2: #8A94A6; }
-  html[data-bp-theme="dark"] .stApp { --c-s: #5AA9FF; --c-b1: #F5B544; --c-b2: #AEB8CA; }
+  .stApp { --c-s: #2E68A8; --c-b1: #C08A2B; --c-b2: #7D8799; --c-b3: #3F8A78;
+    --a1: #2E68A8; --a2: #5B93C8; --a3: #8DB6DA; --a4: #3F8A78; --a5: #C08A2B; --a6: #D9B256; }
+  html[data-bp-theme="dark"] .stApp { --c-s: #5AA9FF; --c-b1: #F5B544; --c-b2: #AEB8CA; --c-b3: #5FD3B8;
+    --a1: #5AA9FF; --a2: #8CC8FF; --a3: #C2E1FF; --a4: #5FD3B8; --a5: #F5B544; --a6: #F7D594; }
   .stage, .rp-root.stage-dark {
+    --stage-bg: #F6F9FD; color: #14213D;
+    --st-ink2: rgba(20,33,61,.74); --st-ink3: rgba(20,33,61,.56);
+    --g-fill: rgba(255,255,255,.78); --g-fill2: rgba(255,255,255,.5); --g-edge: rgba(255,255,255,1);
+    --g-line: rgba(20,33,61,.10); --g-spec: rgba(255,255,255,.8); --g-thumb: #FFFFFF;
+    --acc: #2E68A8; --ok: #2E8B62; --ochre: #B07A1E; --loss: #C0434A;
+    --st-bg: radial-gradient(70% 60% at 88% 0%, rgba(46,104,168,.16), transparent 62%),
+             radial-gradient(55% 55% at 0% 100%, rgba(192,138,43,.10), transparent 62%),
+             linear-gradient(165deg, #FFFFFF 0%, #F6F9FD 58%, #EDF2F9 100%);
+    --st-border: rgba(20,33,61,.09);
+    --st-shadow: 0 40px 80px -56px rgba(20,48,96,.45), 0 14px 30px -24px rgba(20,33,61,.25), inset 0 1px 0 #FFFFFF;
+    --st-grid: rgba(20,33,61,.05); --st-orb: .55;
+    --st-title: linear-gradient(180deg, #14213D 35%, rgba(20,33,61,.72));
+    --st-mega: linear-gradient(100deg, #14213D 0%, #2E68A8 38%, #14213D 62%, #2E68A8 100%);
+    --st-chip: linear-gradient(160deg, rgba(255,255,255,.95), rgba(255,255,255,.6));
+    --st-chip-shadow: inset 0 1px 0 #FFFFFF, 0 10px 22px -16px rgba(20,48,96,.45);
+    --st-glow: rgba(46,104,168,.35);
+    --st-in-bg: rgba(46,139,98,.12); --st-in-fg: #1F6E4C; --st-out-bg: rgba(176,122,30,.14); --st-out-fg: #8A5D12;
+  }
+  html[data-bp-theme="dark"] .stage, html[data-bp-theme="dark"] .rp-root.stage-dark {
     --stage-bg: #070A12; color: #E9EEF6;
+    --st-ink2: rgba(233,238,246,.76); --st-ink3: rgba(233,238,246,.56);
     --g-fill: rgba(255,255,255,.07); --g-fill2: rgba(255,255,255,.025); --g-edge: rgba(255,255,255,.16);
     --g-line: rgba(255,255,255,.10); --g-spec: rgba(255,255,255,.18); --g-thumb: rgba(255,255,255,.15);
-    --acc: #5AA9FF; --ok: #3EE6A4; --ochre: #F5B544; --loss: #FF6B6E; --c-s: #5AA9FF; --c-b1: #F5B544; --c-b2: #AEB8CA;
+    --acc: #5AA9FF; --ok: #3EE6A4; --ochre: #F5B544; --loss: #FF6B6E;
+    --st-bg: radial-gradient(70% 60% at 88% 0%, rgba(58,123,213,.34), transparent 62%),
+             radial-gradient(55% 55% at 0% 100%, rgba(245,181,68,.13), transparent 62%),
+             linear-gradient(165deg, #0D1526 0%, #070A12 55%, #05070C 100%);
+    --st-border: rgba(255,255,255,.08);
+    --st-shadow: 0 50px 100px -50px rgba(7,20,48,.85), 0 24px 44px -32px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.14);
+    --st-grid: rgba(255,255,255,.045); --st-orb: .9;
+    --st-title: linear-gradient(180deg, #FFFFFF 30%, rgba(214,226,244,.62));
+    --st-mega: linear-gradient(100deg, #FFFFFF 0%, #D4E8FF 26%, #5AA9FF 46%, #FFFFFF 60%, #F7D594 80%, #FFFFFF 100%);
+    --st-chip: linear-gradient(160deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
+    --st-chip-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 12px 26px -16px rgba(0,0,0,.9);
+    --st-glow: rgba(90,169,255,.6);
+    --st-in-bg: rgba(62,230,164,.14); --st-in-fg: #86F2C6; --st-out-bg: rgba(245,181,68,.15); --st-out-fg: #F8CB7A;
   }
   .stage, .rp-root.stage-dark {
     position: relative; isolation: isolate; overflow: hidden; border-radius: 34px !important;
-    background:
-      radial-gradient(70% 60% at 88% 0%, rgba(58,123,213,.34), transparent 62%),
-      radial-gradient(55% 55% at 0% 100%, rgba(245,181,68,.13), transparent 62%),
-      linear-gradient(165deg, #0D1526 0%, #070A12 55%, #05070C 100%) !important;
-    border: 1px solid rgba(255,255,255,.08) !important;
-    box-shadow: 0 50px 100px -50px rgba(7,20,48,.85), 0 24px 44px -32px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.14) !important;
+    background: var(--st-bg) !important; border: 1px solid var(--st-border) !important; box-shadow: var(--st-shadow) !important;
   }
   .stage { --sx: clamp(1.2rem, .8rem + 2.6vw, 3.4rem); margin: .4rem 0 1.1rem;
     padding: clamp(1.4rem, 1rem + 2.6vw, 3.4rem) var(--sx) clamp(1.2rem, 1rem + 1.4vw, 2.2rem);
     animation: rise .9s cubic-bezier(.2,.7,.2,1) both; }
   .stage > * { position: relative; }
-  /* the real growth line, glowing, full-bleed in its own lane; it draws itself in (clip reveal: exact at any width) */
   @keyframes wipe { from { clip-path: inset(-20% 100% -20% 0); } to { clip-path: inset(-20% -2% -20% 0); } }
-  .stg-bd { height: 190px; margin: 1.4rem calc(var(--sx) * -1) 0; pointer-events: none; z-index: 0;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%); mask-image: linear-gradient(90deg, transparent 0, #000 9%); }
-  .stg-bdi { position: relative; height: 100%; margin-right: var(--sx); }
-  .stg-bd svg { display: block; width: 100%; height: 100%; overflow: visible; }
-  .stg-bd path { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
-  .stg-bd path.s { stroke-width: 2.6; filter: drop-shadow(0 0 5px rgba(90,169,255,.95)) drop-shadow(0 0 22px rgba(90,169,255,.55));
-    animation: wipe 2.8s cubic-bezier(.45,.05,.2,1) .35s both; }
-  .stg-bd path.b { stroke-width: 1.5; stroke-opacity: .75; animation: wipe 2.8s cubic-bezier(.45,.05,.2,1) .5s both; }
-  .stg-bd path.a { stroke: none; animation: wipe 2.8s cubic-bezier(.45,.05,.2,1) .35s both; }
-  .stage .spec { position: relative; z-index: 1; }
-  .stg-end { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #5AA9FF;
-    box-shadow: 0 0 0 4px rgba(90,169,255,.22), 0 0 26px 8px rgba(90,169,255,.65); animation: fadein .5s 3s both; }
-  .stg-end::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: #5AA9FF;
-    animation: ping 2.4s cubic-bezier(0,0,.2,1) 3.2s infinite; }
   .stg-grid { position: absolute !important; inset: 0; z-index: -2; pointer-events: none; opacity: .6;
-    background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+    background-image: linear-gradient(var(--st-grid) 1px, transparent 1px), linear-gradient(90deg, var(--st-grid) 1px, transparent 1px);
     background-size: 56px 56px; animation: stgPan 50s linear infinite;
     -webkit-mask-image: radial-gradient(75% 70% at 72% 45%, #000, transparent 78%); mask-image: radial-gradient(75% 70% at 72% 45%, #000, transparent 78%); }
   @keyframes stgPan { to { background-position: 56px 56px, 56px 56px; } }
   .stg-orb { position: absolute !important; width: 40rem; height: 40rem; right: -10rem; top: -18rem; z-index: -1; border-radius: 50%;
-    pointer-events: none; filter: blur(80px); opacity: .9;
+    pointer-events: none; filter: blur(80px); opacity: var(--st-orb);
     background: conic-gradient(from 0deg, rgba(90,169,255,0), rgba(90,169,255,.42), rgba(62,230,164,.16), rgba(245,181,68,.28), rgba(90,169,255,0));
     translate: calc(var(--px, 0) * 34px) calc(var(--py, 0) * 34px); transition: translate .9s cubic-bezier(.2,.7,.2,1);
     animation: stgSpin 26s linear infinite; }
   @keyframes stgSpin { to { rotate: 360deg; } }
 
-  .stg-in { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 2rem 3.2rem; align-items: end; }
-  .stage .mh-ctx { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 0; color: rgba(233,238,246,.7); font-size: .8rem; }
-  .stage .mh-ctx span { padding: .3rem .75rem; border-radius: 99px; border: 1px solid var(--g-line);
-    background: linear-gradient(160deg, rgba(255,255,255,.09), rgba(255,255,255,.02)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
-  .stage .mh-ctx span:first-child { color: #CFE6FF; border-color: rgba(90,169,255,.35); background: rgba(90,169,255,.12); }
+  .stg-in { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 2rem 3.2rem; align-items: end; }
+  .stage .mh-ctx { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 0; color: var(--st-ink2); font-size: .8rem; }
+  .stage .mh-ctx span { padding: .3rem .75rem; border-radius: 99px; border: 1px solid var(--g-line); background: var(--st-chip);
+    box-shadow: inset 0 1px 0 var(--g-edge); }
+  .stage .mh-ctx span:first-child { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 35%, transparent);
+    background: color-mix(in srgb, var(--acc) 11%, transparent); }
   .stage .fund { font-size: clamp(2.5rem, 1.1rem + 3.6vw, 4.7rem); max-width: 13ch; margin: .9rem 0 1rem;
-    background: linear-gradient(180deg, #FFFFFF 30%, rgba(214,226,244,.62)); -webkit-background-clip: text; background-clip: text; }
-  .stage .lede { color: rgba(233,238,246,.74); font-size: 1.08rem; max-width: 34rem; }
-  .stage .mh-meta { color: rgba(233,238,246,.8); }
+    background: var(--st-title); -webkit-background-clip: text; background-clip: text; }
+  .stage .lede { color: var(--st-ink2); font-size: 1.06rem; max-width: 34rem; }
+  .stage .mh-meta { color: var(--st-ink2); }
   .stage .mh-meta .st.ok > i { box-shadow: 0 0 10px var(--ok); }
-  .stage .k { color: rgba(233,238,246,.6) !important; }
+  .stage .k { color: var(--st-ink3) !important; }
   .stg-r { padding-bottom: .3rem; min-width: 0; }
-  .mega { font-family: var(--serif); font-size: clamp(3.9rem, 1.4rem + 6.6vw, 8.4rem); font-weight: 700; letter-spacing: -.065em;
-    line-height: .9; margin: .45rem 0 .7rem -.05em; white-space: nowrap; font-variant-numeric: tabular-nums lining-nums; }
-  .mega .cu-n { background: linear-gradient(100deg, #FFFFFF 0%, #D4E8FF 26%, #5AA9FF 46%, #FFFFFF 60%, #F7D594 80%, #FFFFFF 100%);
-    background-size: 280% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-    animation: shimmer 10s ease-in-out infinite alternate; filter: drop-shadow(0 0 34px rgba(90,169,255,.38)); padding-right: .04em; }
-  .mega small { font-size: .19em; letter-spacing: 0; margin-left: .55rem; color: rgba(233,238,246,.55); font-weight: 600; }
+  .mega { font-family: var(--serif); font-size: clamp(3.9rem, 1.4rem + 6.6vw, 8rem); font-weight: 700; letter-spacing: -.06em;
+    line-height: .9; margin: .45rem 0 .5rem -.05em; white-space: nowrap; font-variant-numeric: tabular-nums lining-nums; }
+  .mega .cu-n { background: var(--st-mega); background-size: 280% 100%; -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; animation: shimmer 10s ease-in-out infinite alternate;
+    filter: drop-shadow(0 0 30px color-mix(in srgb, var(--c-s) 30%, transparent)); padding-right: .06em; }
+  .mega .cu-n[data-cu] { background: none; }
+  .mega .cu-n[data-cu]::after { background: var(--st-mega); background-size: 280% 100%; -webkit-background-clip: text;
+    background-clip: text; -webkit-text-fill-color: transparent; }
+  .mega small { font-size: .17em; letter-spacing: 0; margin-left: .6rem; color: var(--st-ink3); font-weight: 600; }
   @keyframes shimmer { from { background-position: 0% 0; } to { background-position: 100% 0; } }
-  .stage .cmp { color: rgba(233,238,246,.74); font-size: .96rem; }
+  .stage .cmp { color: var(--st-ink2); font-size: .96rem; }
   .stage .cmp i { display: inline-block; width: 1rem; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: .55rem; }
-  .stage .hint { color: rgba(233,238,246,.5); max-width: 30rem; }
+  .stage .hint { color: var(--st-ink3); max-width: 32rem; }
+  /* the worst-fall gauge on the stage: one row per portfolio, the client's target and ceiling as ticks */
+  .stage .dd { margin-top: .9rem; }
+  .stage .dd-row { grid-template-columns: 7.4rem 1fr 3.8rem; margin: .5rem 0; }
+  .stage .dd-v { white-space: nowrap; }
+  .stage .dd-l { color: var(--st-ink2); }
+  .stage .dd-t { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .stage .dd-t > .tk { border-left-color: var(--ok); } .stage .dd-t > .tk.c { border-left-color: var(--loss); }
+  .stage .dd-ax { color: var(--st-ink3); } .stage .dd-ax span.t { color: var(--ok); } .stage .dd-ax span.c { color: var(--loss); }
   .chips-k { margin-top: 1.3rem; }
   .chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .55rem; }
   .chip { display: inline-flex; align-items: center; gap: .45rem; padding: .42rem .7rem .42rem .6rem; border-radius: 14px; font-size: .78rem;
-    background: linear-gradient(160deg, rgba(255,255,255,.11), rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.12);
-    backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 12px 26px -16px rgba(0,0,0,.9);
+    background: var(--st-chip); border: 1px solid var(--g-line); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
+    box-shadow: var(--st-chip-shadow);
     translate: calc(var(--px, 0) * (5px + var(--d) * 3px)) calc(var(--py, 0) * (4px + var(--d) * 2px));
     transition: translate .7s cubic-bezier(.2,.7,.2,1), border-color .3s;
     animation: bob 6s ease-in-out infinite; animation-delay: calc(var(--d) * -1.2s); }
-  .chip:hover { border-color: rgba(255,255,255,.3); }
-  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-  .chip i { width: .5rem; height: .5rem; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(62,230,164,.18), 0 0 12px var(--ok); }
-  .chip.out i { background: var(--ochre); box-shadow: 0 0 0 3px rgba(245,181,68,.18); }
+  .chip:hover { border-color: color-mix(in srgb, currentColor 30%, transparent); }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  .chip i { width: .5rem; height: .5rem; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent), 0 0 10px var(--ok); }
+  .chip.out i { background: var(--ochre); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ochre) 18%, transparent); }
   .chip b { font-weight: 650; letter-spacing: .02em; }
-  .chip small { color: rgba(233,238,246,.55); font-size: .72rem; }
-  .chip em { font-style: normal; font-size: .68rem; font-weight: 600; padding: .08rem .45rem; border-radius: 99px; background: rgba(62,230,164,.14); color: #86F2C6; }
-  .chip.out em { background: rgba(245,181,68,.15); color: #F8CB7A; }
-  .stage .spec { margin: -3.2rem 0 0; border: 1px solid var(--g-line); border-radius: 20px; overflow: hidden;
-    background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.015));
-    backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
+  .chip small { color: var(--st-ink3); font-size: .72rem; }
+  .chip em { font-style: normal; font-size: .68rem; font-weight: 600; padding: .08rem .45rem; border-radius: 99px; background: var(--st-in-bg); color: var(--st-in-fg); }
+  .chip.out em { background: var(--st-out-bg); color: var(--st-out-fg); }
+  /* the underwater lane: every portfolio's fall from its previous high, full width, labels in HTML (never stretched) */
+  .uw { margin: 2.2rem 0 0; }
+  .uw-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem 1.4rem; }
+  .uw-h .k { font-size: .86rem !important; color: var(--st-ink2) !important; }
+  .uw-leg { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .76rem; color: var(--st-ink2); }
+  .uw-leg span { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; }
+  .uw-leg i { display: inline-block; width: 1rem; height: 3px; border-radius: 2px; }
+  .uw-p { position: relative; height: 250px; margin-top: .5rem; }
+  .uw-p svg { position: absolute; left: 2.6rem; right: 0; top: 1.3rem; bottom: 1.4rem; width: calc(100% - 2.6rem); height: calc(100% - 2.7rem); overflow: visible; }
+  .uw-p path, .uw-p line { vector-effect: non-scaling-stroke; }
+  .uw-p .ln { fill: none; stroke-linejoin: round; stroke-linecap: round; animation: wipe 2.6s cubic-bezier(.45,.05,.2,1) .35s both; }
+  .uw-p .ln.s { stroke: var(--c-s); stroke-width: 2.6; filter: drop-shadow(0 0 6px var(--st-glow)); }
+  .uw-p .ln.b { stroke-width: 1.4; stroke-opacity: .95; }
+  .uw-p .ar { fill: color-mix(in srgb, var(--c-s) 22%, transparent); animation: wipe 2.6s cubic-bezier(.45,.05,.2,1) .35s both; }
+  .uw-p .band { fill: color-mix(in srgb, var(--ochre) 9%, transparent); }
+  .uw-p .gl { stroke: currentColor; stroke-opacity: .09; stroke-width: 1; }
+  .uw-p .tl { stroke: var(--ok); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .uw-p .cl { stroke: var(--loss); stroke-width: 1.2; stroke-opacity: .8; }
+  .uw-y, .uw-x, .uw-c, .uw-r { position: absolute; font-size: .7rem; color: var(--st-ink3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .uw-y { left: 0; width: 2.2rem; text-align: right; transform: translateY(-50%); }
+  .uw-x { bottom: 0; transform: translateX(-50%); }
+  .uw-c { top: 0; transform: translateX(-50%); font-size: .68rem; font-weight: 600; color: var(--ochre); }
+  .uw-r { right: .2rem; transform: translateY(-115%); font-size: .66rem; font-weight: 600; padding: 0 .35rem; border-radius: 6px;
+    background: color-mix(in srgb, var(--stage-bg) 82%, transparent); }
+  .uw-r.t { color: var(--ok); } .uw-r.c { color: var(--loss); }
+  .stage .spec { position: relative; z-index: 1; margin: 1.6rem 0 0; border: 1px solid var(--g-line); border-radius: 20px; overflow: hidden;
+    background: var(--st-chip); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: inset 0 1px 0 var(--g-edge); }
   .stage .spec > div, .stage .spec > div:not(:nth-child(4n+1)) { padding: .9rem 1.15rem; }
   .stage .spec > div:nth-last-child(-n+4) { border-bottom: 0; }
-  .stage .spec span { color: rgba(233,238,246,.5); }
+  .stage .spec span { color: var(--st-ink3); }
+
+  /* crisis cards and the bull-market comparison: diverging bars around zero, one row per portfolio */
+  .sec-h { margin: 2.2rem .2rem .2rem; }
+  .sec-h .ch-t { margin-top: .15rem; }
+  .crg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin-top: .9rem; }
+  .crc, .blc { position: relative; isolation: isolate; overflow: hidden; border-radius: 24px; padding: 1.05rem 1.15rem 1rem;
+    background: linear-gradient(165deg, var(--g-fill), var(--g-fill2)); border: 1px solid var(--g-line);
+    backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: inset 0 1px 0 var(--g-edge), var(--g-shadow); }
+  .crc::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(80% 60% at 100% 0%, color-mix(in srgb, var(--c-s) 13%, transparent), transparent 70%); }
+  .crc .cn { font-weight: 650; font-size: 1rem; letter-spacing: -.015em; }
+  .crc .cd { font-size: .74rem; color: var(--ink3); margin-top: .1rem; }
+  .crc .cv { font-family: var(--serif); font-weight: 700; font-size: 2.5rem; letter-spacing: -.05em; line-height: 1; margin: .75rem 0 .1rem;
+    font-variant-numeric: tabular-nums lining-nums; }
+  .crc .cs { font-size: .74rem; color: var(--ink3); margin-bottom: .55rem; }
+  .dv { display: grid; gap: .42rem; }
+  .dv > div { display: grid; grid-template-columns: 4.6rem minmax(0, 1fr) 3.3rem; align-items: center; gap: .55rem; font-size: .75rem; }
+  .dv span { color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dv b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dv i { position: relative; display: block; height: .55rem; border-radius: 99px; background: color-mix(in srgb, currentColor 7%, transparent); }
+  .dv i::after { content: ""; position: absolute; top: -.2rem; bottom: -.2rem; left: var(--z); border-left: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+  .dv u { position: absolute; top: 0; bottom: 0; border-radius: 99px; transform-origin: var(--o, left); animation: grow 1.2s cubic-bezier(.2,.7,.2,1) .2s both; }
+  .pos { color: var(--ok); } .neg { color: var(--loss); }
+  .blc .cv { font-family: var(--serif); font-weight: 700; font-size: 2.3rem; letter-spacing: -.05em; line-height: 1; margin: .55rem 0 .2rem; }
+  .blc .cv small { font-family: inherit; font-size: .85rem; font-weight: 500; letter-spacing: 0; margin-left: .45rem; color: var(--ink3); }
+  .blc .cn { font-weight: 650; font-size: .98rem; letter-spacing: -.015em; }
+  .blc .cs { font-size: .78rem; color: var(--ink2); line-height: 1.5; margin: .3rem 0 .8rem; }
+  .blc .dv > div { grid-template-columns: 6.2rem minmax(0, 1fr) 3.6rem; font-size: .8rem; }
+  .st-key-bull [data-testid="stHorizontalBlock"] { align-items: stretch; }
+  .st-key-bull [data-testid="stButtonGroup"] { margin: .5rem 0 .2rem; }
 
   /* drawdown: the client's key number, big */
   .ddc .ddn { display: flex; flex-wrap: wrap; gap: .6rem 2.4rem; margin-top: .7rem; }
@@ -388,31 +471,37 @@ STAGE = """
 
   /* replay: the cinematic dark stage */
   .rp-root.stage-dark { padding: .8rem 1.8rem 1.6rem; }
-  .rp-root.stage-dark .rp-glow { filter: drop-shadow(0 0 5px rgba(90,169,255,.9)) drop-shadow(0 0 16px rgba(90,169,255,.45)); }
-  .rp-root.stage-dark .rp-date b { font-size: 2.4rem; background: linear-gradient(90deg, #fff, #9CCBFF); -webkit-background-clip: text;
+  .rp-root.stage-dark .rp-glow { filter: drop-shadow(0 0 5px var(--st-glow)) drop-shadow(0 0 14px var(--st-glow)); }
+  .rp-root.stage-dark .rp-date b { font-size: 2.4rem; background: var(--st-title); -webkit-background-clip: text;
     background-clip: text; -webkit-text-fill-color: transparent; }
+  .rp-root.stage-dark .rp-k, .rp-root.stage-dark .rp-date small, .rp-root.stage-dark .rp-tlx, .rp-root.stage-dark .rp-st .h { color: var(--st-ink3); }
+  .rp-root.stage-dark .rp-leg, .rp-root.stage-dark .rp-seg button, .rp-root.stage-dark .rp-pill { color: var(--st-ink2); }
   .rp-root.stage-dark .rp-play { background: linear-gradient(180deg, #6DB5FF, #2F7FE0); box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 10px 30px -8px rgba(90,169,255,.9); }
-  .rp-root.stage-dark .rp-tile { background: linear-gradient(165deg, rgba(255,255,255,.07), rgba(255,255,255,.02)) !important; }
-  .rp-root.stage-dark .rp-tile.in { box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 0 1px rgba(62,230,164,.12), 0 18px 40px -26px rgba(62,230,164,.55); }
+  .rp-root.stage-dark .rp-tile { background: linear-gradient(165deg, var(--g-fill), var(--g-fill2)) !important; }
+  .rp-root.stage-dark .rp-tile.in { box-shadow: inset 0 1px 0 var(--g-edge), 0 0 0 1px color-mix(in srgb, var(--ok) 14%, transparent), 0 18px 40px -26px color-mix(in srgb, var(--ok) 55%, transparent); }
 
   /* scroll reveals: CSS view timeline only (nothing hidden where unsupported) */
   @keyframes reveal { from { opacity: 0; transform: translateY(42px) scale(.97); } }
   @supports (animation-timeline: view()) {
     @media (prefers-reduced-motion: no-preference) {
-      .st-key-bento [data-testid="stColumn"], .ddc, [data-testid="stPlotlyChart"], .rp-root.stage-dark, .ii {
+      .st-key-bento [data-testid="stColumn"], .crc, .blc, [data-testid="stPlotlyChart"], .rp-root.stage-dark, .ii {
         animation: reveal linear both; animation-timeline: view(); animation-range: entry 0% entry 60%; }
     }
   }
 
-  @media (max-width: 900px) { .stg-in { grid-template-columns: 1fr; } .stage .fund { max-width: 16ch; } }
+  @media (max-width: 900px) { .stg-in { grid-template-columns: 1fr; } .stage .fund { max-width: 16ch; }
+    .crg { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .crg { grid-template-columns: 1fr; } }
   @media (max-width: 640px) {
     .stage { border-radius: 26px !important; padding: 1.35rem 1.15rem 1.15rem; }
     .stage .mh-ctx { font-size: .72rem; white-space: normal; overflow: visible; }
     .stage .fund { font-size: 2.45rem; }
     .stage .lede { font-size: 1rem; }
     .mega { font-size: 4.3rem; }
-    .stg-bd { height: 120px; margin-top: 1rem; }
-    .stage .spec { margin-top: -2rem; }
+    .uw { margin-top: 1.6rem; } .uw-p { height: 180px; } .uw-c { display: none; }
+    .stage .dd-row { grid-template-columns: 5.4rem 1fr 3.7rem; gap: .5rem; }
+    .stage .dd-v { font-size: .84rem; }
+    .mega small { display: block; margin: .5rem 0 0; font-size: .2em; }
     .stg-orb { width: 26rem; height: 26rem; right: -12rem; top: -12rem; }
     .chip { font-size: .74rem; padding: .36rem .6rem .36rem .5rem; } .chip small { display: none; }
     .stage .spec { margin-top: 1.6rem; }
@@ -434,9 +523,9 @@ STAGE = """
     .rp-root.stage-dark { padding: .5rem .95rem 1.1rem; border-radius: 26px !important; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .stage, .stg-bd path, .stg-end, .stg-end::after, .stg-grid, .stg-orb, .mega .cu-n, .chip, .mv .ln, .mv .ar, .mdot, .mv .val, .mv .ndl,
-    .mbars u, .tg u { animation: none !important; }
-    .stg-bd path, .mv .ln { clip-path: none; }
+    .stage, .uw-p .ln, .uw-p .ar, .stg-grid, .stg-orb, .mega .cu-n, .chip, .mv .ln, .mv .ar, .mdot, .mv .val, .mv .ndl,
+    .mbars u, .tg u, .dv u { animation: none !important; }
+    .uw-p .ln, .uw-p .ar, .mv .ln { clip-path: none; }
   }
 </style>
 """

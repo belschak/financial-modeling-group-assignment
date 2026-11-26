@@ -15,8 +15,9 @@ import pandas as pd
 import fm_lean as fl
 
 # Crisis presets (month the replay stops at). Shown only if inside the chosen period.
-PRESETS = [("2008-02", "2009-02", "2008 crash"), ("2010-11", "2011-09", "Euro crisis 2011"),
-           ("2020-02", "2020-03", "COVID 2020"), ("2022-01", "2022-09", "2022 rate shock")]
+# The notebook's crisis windows (section 7): the replay starts a little before and stops at the last month.
+PRESETS = [("2007-11", "2009-02", "Financial crisis"), ("2011-05", "2011-09", "Euro crisis 2011"),
+           ("2020-02", "2020-03", "Covid 2020"), ("2022-01", "2022-12", "2022 inflation shock")]
 
 
 def _clean(s: pd.Series) -> list:
@@ -30,6 +31,7 @@ def payload(bt: dict, data: dict, tickers: tuple, names: dict, sma: int, lag: in
     dds, ddb = fl.drawdown(net["Strategy"]), fl.drawdown(net[bench])
     tick = list(tickers)
     held = (bt["weights"][tick].loc[net.index] > 0).astype(int)
+    target = bt["weights"][tick].max()                    # each sleeve's target weight (it is 0 or this)
     px = data["px"][tick]
     avg = px.rolling(sma).mean()
     pos = px.index.get_indexer(net.index) - lag          # decision month of each held month
@@ -46,7 +48,7 @@ def payload(bt: dict, data: dict, tickers: tuple, names: dict, sma: int, lag: in
         n=len(dates) - 1, dates=dates, bench=bench, benchLabel=bench_label, sma=sma, lag=lag,
         s=[round(float(v) * 10000, 1) for v in ws], b=[round(float(v) * 10000, 1) for v in wb],
         dds=r4(dds), ddb=r4(ddb), tickers=tick, names=[names[t] for t in tick],
-        held=held.to_numpy().tolist(),
+        held=held.to_numpy().tolist(), w=[round(float(target[t]), 6) for t in tick],
         pxDates=[f"{d:%Y-%m}" for d in pxs.index], dec=[int(p - lo) for p in pos],
         px={t: _clean(pxs[t]) for t in tick}, avg={t: _clean(avs[t]) for t in tick},
         presets=presets, colors=colors, target=0.10, ceiling=0.20,
@@ -208,10 +210,12 @@ JS = r"""
   // rebuilds whenever they change, so the replay can never show an earlier run's numbers.
   function setData(j) {
     J = j; D = JSON.parse(j); N = D.n; C = D.colors; NT = D.tickers.length; EV = [];
+    var tw = D.w.reduce(function (a, b) { return a + b; }, 0) || 1; D.w = D.w.map(function (x) { return x / tw; });
     for (var k = 1; k < D.held.length; k++) for (var q = 0; q < NT; q++)
       if (D.held[k][q] !== D.held[k - 1][q]) EV.push({ i: k + 1, j: q, on: D.held[k][q] === 1 });
   }
   function heldAt(i) { return D.held[Math.max(i, 1) - 1]; }
+  function share(h) { var s = 0; for (var q = 0; q < NT; q++) s += h[q] * D.w[q]; return s; }   // weight invested
   var S = { i: N, playing: false, speed: 1, acc: 0, last: 0, raf: 0, target: null, preset: null, callT: 0, root: null };
   var R = {}, io = null, ro = null, lastW = -1, lastEvTop = -1, prevHeld = null;
 
@@ -336,10 +340,9 @@ JS = r"""
 
   // ---------- call-out (data of the month shown)
   function showCall(k, stay) {
-    var p = D.presets[k], i = p.b, h = heldAt(i), cash = NT - h.reduce(function (a, b) { return a + b; }, 0);
+    var p = D.presets[k], i = p.b, h = heldAt(i), cash = 1 - share(h);
     var worstS = Math.min.apply(null, D.dds.slice(0, i + 1)), worstB = Math.min.apply(null, D.ddb.slice(0, i + 1));
-    R.call.innerHTML = "<b>" + p.label + " &middot; " + lab(D.dates[i]) + "</b>" + cash + " of " + NT +
-      " slices waiting in euro cash. Fall from the previous high: strategy <strong>" + pc(D.dds[i]) + "</strong>, " +
+    R.call.innerHTML = "<b>" + p.label + " &middot; " + lab(D.dates[i]) + "</b>" + Math.round(cash * 100) + "% of the portfolio waiting in euro cash. Fall from the previous high: strategy <strong>" + pc(D.dds[i]) + "</strong>, " +
       D.bench + " <strong>" + pc(D.ddb[i]) + "</strong>.";
     var right = S.geo && S.geo.X(i) < S.geo.l + S.geo.w * 0.55;
     R.call.classList.toggle("right", !!right);
@@ -415,7 +418,7 @@ JS = r"""
     var base = el("g", { fill: "currentColor", "fill-opacity": .14 }, tl), past = el("g", { fill: C.strategy, "clip-path": "url(#" + cid + ")" }, tl);
     var bw = TW / (N + 1);
     for (var k2 = 0; k2 <= N; k2++) {
-      var hh = heldAt(k2).reduce(function (a, b) { return a + b; }, 0) / NT, bh = Math.max(2, (TH - 4) * hh);
+      var hh = share(heldAt(k2)), bh = Math.max(2, (TH - 4) * hh);
       var at = { x: k2 * bw, y: TH - bh, width: Math.max(0.6, bw - (bw > 3 ? 1 : 0.25)), height: bh };
       el("rect", at, base); el("rect", at, past);
     }
@@ -458,8 +461,8 @@ JS = r"""
     R.us.setAttribute("d", us); R.ub.setAttribute("d", path(D.ddb, i, X, UY));
     R.ua.setAttribute("d", us + "L" + X(i).toFixed(1) + " " + UY(0) + "L" + X(0) + " " + UY(0) + "Z");
     // ring + board
-    var h = heldAt(i), inv = h.reduce(function (a, b) { return a + b; }, 0);
-    R.inv.textContent = Math.round(inv / NT * 100) + "%";
+    var h = heldAt(i);
+    R.inv.textContent = Math.round(share(h) * 100) + "%";
     R.slices.forEach(function (p, j) { p.setAttribute("class", h[j] ? "on" : "off"); R.rl[j].setAttribute("class", h[j] ? "on" : "off"); });
     var dec = D.dec[Math.max(i, 1) - 1];
     R.tiles.forEach(function (T, j) {
@@ -499,8 +502,9 @@ JS = r"""
 
   function buildRing() {
     R.rl = []; var svg = R.ring, cx = 100, cy = 100, ro2 = 96, ri = 66, gap = NT > 1 ? 0.045 : 0; R.slices = [];
-    for (var j = 0; j < NT; j++) {
-      var a0 = -Math.PI / 2 + j * 2 * Math.PI / NT + gap, a1 = -Math.PI / 2 + (j + 1) * 2 * Math.PI / NT - gap, big = a1 - a0 > Math.PI ? 1 : 0;
+    for (var j = 0, cum = 0; j < NT; j++) {
+      var a0 = -Math.PI / 2 + cum * 2 * Math.PI + gap; cum += D.w[j];
+      var a1 = -Math.PI / 2 + cum * 2 * Math.PI - gap, big = a1 - a0 > Math.PI ? 1 : 0;
       var p = function (r, a) { return (cx + r * Math.cos(a)).toFixed(2) + " " + (cy + r * Math.sin(a)).toFixed(2); };
       var d = "M" + p(ro2, a0) + "A" + ro2 + " " + ro2 + " 0 " + big + " 1 " + p(ro2, a1) + "L" + p(ri, a1) + "A" + ri + " " + ri + " 0 " + big + " 0 " + p(ri, a0) + "Z";
       var s = el("path", { d: d, fill: C.assets[j % C.assets.length], stroke: "currentColor", "stroke-width": 1, "stroke-dasharray": "3 3" }, svg);

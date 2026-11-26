@@ -68,7 +68,7 @@ def test_changing_one_assumption_changes_numbers_and_reset_restores():
     assert _card(at, "Sharpe ratio").value != sharpe0 and "Custom assumptions" in _md(at)
     at.button[0].click().run()
     assert not at.exception and _card(at, "Sharpe ratio").value == sharpe0
-    assert at.session_state["period_rev"] == 1 and at.select_slider(key="period_1").value == ("2007-01", "2025-12")
+    assert at.session_state["period_rev"] == 1 and at.select_slider(key="period_1").value == ("2005-01", "2025-12")
 
 
 def test_next_day_shown_beside_and_selectable():
@@ -82,24 +82,54 @@ def test_next_day_shown_beside_and_selectable():
 def test_period_and_benchmark_keep_each_other():
     at = _app()
     at.select_slider(key="period_0").set_range("2010-01", "2020-12").run()
-    at.radio(key="bench").set_value("B2").run()
+    at.radio(key="bench").set_value("B3").run()
     assert at.session_state["period_0"] == ("2010-01", "2020-12")
-    assert any(m.label == "Beta vs B2" for m in at.metric)
+    assert any(m.label == "Beta vs B3" for m in at.metric)
 
 
-def test_long_window_moves_the_start_instead_of_failing():
+def test_long_window_keeps_the_2005_start():
+    """The stand-ins give every sleeve enough history: even a 12-month average with a 2-month delay starts in 2005."""
     at = _app()
     at.slider(key="sma").set_value(12).run()
     at.radio(key="lag").set_value(2).run()
     assert not at.exception and not at.error
-    assert any("Start moved to" in i.value for i in at.info)
+    assert not any("Start moved to" in i.value for i in at.info)
     assert "above its 12-month average" in _md(at)   # intro follows the window slider
+    assert "Jan 2005 to Dec 2025" in _md(at)
+
+
+def test_crash_first_stage_crises_and_bull_markets_equal_results_json():
+    """The page leads with the worst falls of all four portfolios, then the notebook's crisis and bull-market tables."""
+    at = _app()
+    md = _md(at)
+    stage = next(m.value for m in at.markdown if "class='stage'" in m.value)
+    assert stage.index("Worst fall from a previous high") < stage.index("class='uw'")   # crash view first
+    for key in ("strategy", "B1_same_mix", "B2_60_40", "B3_msci_world"):
+        assert f"{RJ['portfolios'][key]['max_drawdown']:.1%}" in stage, key
+    for row in RJ["robustness"]["crises"]:
+        assert row["window"] in md and f"{row['Strategy']:+.1%}" in md and f"{row['B3 MSCI World']:+.1%}" in md
+    bull = RJ["robustness"]["bull_markets"]
+    assert at.segmented_control(key="bull_win").value == bull[0]["period"]
+    assert f"{bull[0]['strategy']:.1%}" in md and f"{bull[0]['B3_msci_world']:+.1%}" in md
+    at.segmented_control(key="bull_win").set_value(bull[1]["period"]).run()
+    md = _md(at)
+    assert not at.exception and f"{bull[1]['strategy']:.1%}" in md and f"{bull[1]['B3_msci_world']:+.1%}" in md
+
+
+def test_rolling_view_and_costs_match_notebook():
+    at = _app()
+    md = _md(at)
+    r = RJ["rolling"]
+    assert (f"above B1's in {r['share_windows_sharpe_above_benchmark']:.0%} of all windows; its beta stayed between "
+            f"{r['beta_min']:.2f} and {r['beta_max']:.2f}") in md
+    assert _card(at, "Breakeven on Sharpe vs B1").value == f"{RJ['breakeven_cost_bps']['B1_same_mix_sharpe']:.0f} bps"
+    assert _card(at, "Breakeven on return vs B1").value == "none"   # B1 ahead even at zero cost, as in the notebook
 
 
 def test_extreme_settings_never_show_a_traceback():
     at = _app()
-    for c in (dict(tickers=["SPY", "IEF"]), dict(bench="B2"), dict(cost_bps=100), dict(lag=2, sma=6),
-              dict(next_day=True, tickers=["VNQ", "DBC"])):
+    for c in (dict(tickers=["SPY", "IEF"]), dict(bench="B2"), dict(bench="B3"), dict(cost_bps=100), dict(lag=2, sma=6),
+              dict(next_day=True, tickers=["XLU", "GLD"])):
         for k, v in c.items():
             at.session_state[k] = v
         at.run()
