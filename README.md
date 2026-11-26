@@ -6,7 +6,9 @@ Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridol
 **Live app:** https://financial-modeling-group-bp.streamlit.app
 **Notebook:** `FM-Group-BP-Backtest.ipynb`, submitted on Moodle together with the investor prospectus
 
-![Overview: assumptions in the sidebar, the six required measures against the benchmark](docs/screenshot-overview.png)
+![Overview: assumptions in the sidebar, key facts, growth of 10,000 EUR, largest fall against the client's target, the six required measures](docs/screenshot-overview.png)
+
+On a phone the same page stacks into one column ([phone layout](docs/screenshot-mobile.png)).
 
 ## What it does
 
@@ -107,9 +109,9 @@ SHA-256 hashes), `python tools/make_snapshot.py --from-notebook <notebook output
 
 ## Use of generative AI
 
-Use of generative AI. We used Claude Code (Anthropic) throughout the project: for research, including proposing the published trend rule we adopted (Faber 2007), for the notebook and app code, and for drafting and laying out this text. We checked all outputs with 16 automated tests, a fresh Colab run, a comparison with an earlier, separately written version of our backtest (same Table 1), and our own review of code, numbers and text against the notebook output.
+Strategy, client and conclusions were chosen by the group and discussed in regular group calls. We used Claude Code (Anthropic) as an assistant: to brainstorm and double-check our ideas against the published research, to help write and test the notebook and app code, and to help draft and lay out the prospectus text. We checked its outputs with 16 automated tests, a fresh Colab run, a second, separately written version of the backtest (same Table 1) and our own review of code, numbers and text against the notebook output.
 
-(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 18 pytest tests for the app; "this text" refers to the prospectus.)
+(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 18 pytest tests for the app.)
 
 Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
 future returns.
