@@ -1,6 +1,6 @@
 {
  "meta": {
-  "strategy_name": "BP Trend-Guarded Multi-Asset",
+  "strategy_name": "Trend-Guarded Multi-Asset",
   "group": "BP",
   "is_mock": false,
   "engine_version": "lean-2.0",

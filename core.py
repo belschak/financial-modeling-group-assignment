@@ -13,7 +13,7 @@ import pandas as pd
 
 import fm_lean as fl
 
-STRATEGY = "BP Trend-Guarded Multi-Asset"
+STRATEGY = "Trend-Guarded Multi-Asset"
 NAMES = {"SPY": "US equity", "EFA": "Developed ex-US equity", "IEF": "US Treasuries 7-10y", "XLU": "US utilities",
          "DBC": "Commodities", "GLD": "Gold"}
 BENCH = {"B1": "B1 Same mix, always invested", "B2": "B2 Classic 60/40", "B3": "B3 MSCI World"}

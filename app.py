@@ -1,4 +1,4 @@
-"""BP Trend-Guarded Multi-Asset: interactive backtest (Nova SBE 2270 Financial Modeling, Group BP).
+"""Trend-Guarded Multi-Asset: interactive backtest (Nova SBE 2270 Financial Modeling, Group BP).
 
 Run locally:  streamlit run app.py
 Every number comes from fm_lean.py, the same module the submitted notebook writes and runs.
@@ -27,7 +27,7 @@ DISCLAIMER = "Hypothetical back-tested results. Past performance does not predic
 COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 LIVE_RETRY_AFTER_S = 600  # after a failed live download, use the snapshot for 10 minutes before trying again
 
-st.set_page_config(page_title="BP Trend-Guarded Multi-Asset | Backtest", page_icon=":material/stacked_line_chart:",
+st.set_page_config(page_title="Trend-Guarded Multi-Asset | Backtest", page_icon=":material/stacked_line_chart:",
                    layout="wide")
 # Light theme on a viewer's first visit; the menu switch (System / Light / Dark) keeps working and wins once used.
 # Streamlit has no config option for this and stores "System" on its first load, so once per browser (own marker
