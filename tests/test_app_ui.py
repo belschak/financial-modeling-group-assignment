@@ -59,6 +59,8 @@ def test_client_target_and_ceiling_equal_results_json():
                                                                                 c["hard_max_drawdown"])
     assert (f"worst fall of at most {c['target_max_drawdown']:.0%}, with {c['hard_max_drawdown']:.0%} as the hard "
             "ceiling") in _md(at)
+    assert f"cannot sit through a fall of more than {c['hard_max_drawdown']:.0%}." in _md(at)   # opening text, same constant
+    assert "25% fall" not in _md(at)
 
 
 def test_changing_one_assumption_changes_numbers_and_reset_restores():
