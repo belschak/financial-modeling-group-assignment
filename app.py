@@ -493,20 +493,16 @@ is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
 
 # ---------------------------------------------------------------- masthead
 LIVE = data["origin"] == "live"
-html("<div class='rule-top'></div><div class='eyebrow'><span><b>Backtest factsheet</b></span><span>Hypothetical fund"
-     "</span><span>Multi-asset · trend following</span><span>Base currency EUR</span>"
-     f"<span class='live{'' if LIVE else ' snap'}'><i></i>{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
-m1, m2 = st.columns([1.75, 1], gap="large")
-with m1:
-    html(f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
-         "<div class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
-         f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro "
-         "cash. Designed for cautious euro-area savers about 10 years from retirement.</div>")
-    if is_default:
-        html("<span class='badge ok'><i></i>Defaults: matches prospectus Table 1</span>")
-    else:
-        html("<span class='badge cu'><i></i>Custom assumptions: differs from prospectus</span>")
-facts_slot = m2.empty()
+status = ("<span class='st ok'><i></i>Defaults: matches prospectus Table 1</span>" if is_default else
+          "<span class='st cu'><i></i>Custom assumptions: differs from prospectus</span>")
+html("<div class='mh-ctx'>Hypothetical fund<i>·</i>Multi-asset trend following<i>·</i>EUR</div>"
+     f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
+     "<div class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
+     f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro "
+     "cash. Designed for cautious euro-area savers about 10 years from retirement.</div>"
+     f"<div class='mh-meta'>{status}<span class='st live{'' if LIVE else ' snap'}'><i></i>"
+     f"{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
+facts_slot = st.empty()
 if data_warning:
     st.warning(data_warning, icon=":material/cloud_off:")
 for n in notes:
@@ -541,8 +537,9 @@ facts = [("Backtest period", f"{first:%b %Y} to {last:%b %Y}"), ("Observations",
          ("Trend rule", f"{ui['sma']}-month average, lag {ui['lag']}"), ("Trades at", trade_at),
          ("Trading cost", f"{ui['cost_bps']} bps one-way"), ("Assets", " · ".join(ui["tickers"])),
          ("Benchmark", BL), ("Rebalancing", "Monthly, to equal slices")]
-facts_slot.markdown("<div class='facts'><div class='fh'>Key facts</div><dl>"
-                    + "".join(f"<dt>{a}</dt><dd>{b}</dd>" for a, b in facts) + "</dl></div>", unsafe_allow_html=True)
+facts_slot.markdown("<div class='spec' aria-label='Key facts'>"
+                    + "".join(f"<div><span>{a}</span><b>{b}</b></div>" for a, b in facts) + "</div>",
+                    unsafe_allow_html=True)
 
 
 def pct(x, d=1):
