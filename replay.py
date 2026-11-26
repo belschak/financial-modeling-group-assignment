@@ -55,7 +55,7 @@ def payload(bt: dict, data: dict, tickers: tuple, names: dict, sma: int, lag: in
 
 def root(p: dict) -> str:
     """The panel, with this run's data as an attribute (Streamlit rewrites it on every rerun)."""
-    return ("<div class='rp-root rp-panel' aria-label='Backtest replay' data-j='"
+    return ("<div class='rp-root rp-panel stage-dark' aria-label='Backtest replay' data-j='"
             + html.escape(json.dumps(p, separators=(",", ":")), quote=True)
             + "'><div class='rp-wait'>Loading the replay...</div></div>")
 
@@ -69,7 +69,7 @@ def script() -> str:
 
 CSS = """
 <style>
-  .rp-root { --rpH: 300px; position: relative; margin: .8rem 0 .6rem; min-height: 520px; padding: .6rem 1.5rem 1.4rem; }
+  .rp-root { --rpH: 340px; position: relative; margin: .8rem 0 .6rem; min-height: 520px; padding: .6rem 1.5rem 1.4rem; }
   .rp-root > * { position: relative; z-index: 3; }
   .rp-wait { font-size: .8rem; color: var(--ink3); padding: 2rem 0; }
   .rp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; padding: .8rem 0 .9rem; border-bottom: 1px solid var(--g-line, var(--rule)); }
@@ -383,7 +383,7 @@ JS = r"""
     el("stop", { offset: "1", "stop-color": C.strategy, "stop-opacity": "0" }, lg);
     R.area = el("path", { fill: "url(#" + gid + ")" }, g);
     R.lb = el("path", { "class": "rp-ln", stroke: C.bench, "stroke-width": 2, "stroke-opacity": .9 }, g);
-    R.ls = el("path", { "class": "rp-ln", stroke: C.strategy, "stroke-width": 2.8 }, g);
+    R.ls = el("path", { "class": "rp-ln rp-glow", stroke: C.strategy, "stroke-width": 2.8 }, g);
     R.cur = el("line", { "class": "rp-cur", y1: t, y2: t + h }, g);
     R.pb = el("circle", { r: 4, fill: C.bench }, g);
     R.pp = el("circle", { r: 5, fill: C.strategy, "class": "rp-ping" }, g);
@@ -427,7 +427,8 @@ JS = r"""
   function draw() {
     if (!S.root || !R.g) return;
     var bg = getComputedStyle(S.root.closest(".stApp") || document.body).backgroundColor;
-    S.root.style.setProperty("--rpBg", bg && bg !== "rgba(0, 0, 0, 0)" ? bg : "#fff");
+    var sb = getComputedStyle(S.root).getPropertyValue("--stage-bg").trim();
+    S.root.style.setProperty("--rpBg", sb || (bg && bg !== "rgba(0, 0, 0, 0)" ? bg : "#fff"));
     if (R.g.clientWidth !== lastW) { lastW = R.g.clientWidth; if (!layout()) return; }
     update();
   }

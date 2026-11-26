@@ -335,6 +335,7 @@ def html(s: str):
 
 
 html(glass.CSS)
+html(glass.STAGE)
 st.html(glass.JS, unsafe_allow_javascript=True)
 
 
@@ -495,14 +496,17 @@ is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
 LIVE = data["origin"] == "live"
 status = ("<span class='st ok'><i></i>Defaults: matches prospectus Table 1</span>" if is_default else
           "<span class='st cu'><i></i>Custom assumptions: differs from prospectus</span>")
-html("<div class='mh-ctx'>Hypothetical fund<i>·</i>Multi-asset trend following<i>·</i>EUR</div>"
-     f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
-     "<div class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
-     f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro "
-     "cash. Designed for cautious euro-area savers about 10 years from retirement.</div>"
-     f"<div class='mh-meta'>{status}<span class='st live{'' if LIVE else ' snap'}'><i></i>"
-     f"{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
-facts_slot = st.empty()
+MAST = ("<div class='mh-ctx'><span>Hypothetical fund</span><span>Multi-asset trend following</span><span>EUR</span></div>"
+        f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
+        "<div class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
+        f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro "
+        "cash. Designed for cautious euro-area savers about 10 years from retirement.</div>"
+        f"<div class='mh-meta'>{status}<span class='st live{'' if LIVE else ' snap'}'><i></i>"
+        f"{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
+# The stage (dark in both themes): masthead now, completed with the headline numbers once the backtest has run.
+stage_slot = st.empty()
+stage_slot.markdown(f"<section class='stage'><div class='stg-in'><div class='stg-l'>{MAST}</div></div></section>",
+                    unsafe_allow_html=True)
 if data_warning:
     st.warning(data_warning, icon=":material/cloud_off:")
 for n in notes:
@@ -537,9 +541,10 @@ facts = [("Backtest period", f"{first:%b %Y} to {last:%b %Y}"), ("Observations",
          ("Trend rule", f"{ui['sma']}-month average, lag {ui['lag']}"), ("Trades at", trade_at),
          ("Trading cost", f"{ui['cost_bps']} bps one-way"), ("Assets", " · ".join(ui["tickers"])),
          ("Benchmark", BL), ("Rebalancing", "Monthly, to equal slices")]
-facts_slot.markdown("<div class='spec' aria-label='Key facts'>"
-                    + "".join(f"<div><span>{a}</span><b>{b}</b></div>" for a, b in facts) + "</div>",
-                    unsafe_allow_html=True)
+SPEC = ("<div class='spec' aria-label='Key facts'>"
+        + "".join(f"<div><span>{a}</span><b>{b}</b></div>" for a, b in facts) + "</div>")
+# Stage colours: the prospectus hues (navy strategy, ochre B1, grey B2), lit for a dark ground.
+SC = dict(s="#5AA9FF", b="#F5B544" if B == "B1" else "#AEB8CA")
 
 
 def pct(x, d=1):
@@ -574,29 +579,50 @@ def dd_row(label, v, color):
             f"{at(v)};background:{color}'></div>{ticks}</div><span class='dd-v'>{v:.1%}</span></div>")
 
 
-def _spark() -> str:
-    """The real growth paths (strategy and benchmark), drawn as a self-drawing sparkline in the headline."""
-    ws, wb = fl.wealth(net["Strategy"]).to_numpy(), fl.wealth(net[B]).to_numpy()
-    lo, hi = min(ws.min(), wb.min()), max(ws.max(), wb.max())
-    n = len(ws)
-
-    def xy(i, v):
-        return 1000 * i / max(n - 1, 1), 96 - 92 * (v - lo) / ((hi - lo) or 1)
-
-    def path(w):
-        return "M" + " L".join(f"{x:.1f} {y:.2f}" for x, y in (xy(i, v) for i, v in enumerate(w)))
-
-    ex, ey = xy(n - 1, ws[-1])
-    area = path(ws) + " L1000 100 L0 100 Z"
-    bcol = pal["b1"] if B == "B1" else pal["b2"]
-    return ("<div class='spark'><svg viewBox='0 0 1000 100' preserveAspectRatio='none' aria-hidden='true'>"
-            f"<path class='area' d='{area}' fill='rgba(46,104,168,.08)'></path>"
-            f"<path class='b' pathLength='1' d='{path(wb)}' stroke='{bcol}'></path>"
-            f"<path class='s' pathLength='1' d='{path(ws)}' stroke='{pal['strategy']}'></path></svg>"
-            f"<span class='dot' style='left:{ex / 10:.2f}%;top:{ey:.2f}%;background:{pal['strategy']}'></span></div>")
+def _pts(vals, w=1000.0, top=10.0, bot=290.0, lo=None, hi=None):
+    lo = min(vals) if lo is None else lo
+    hi = max(vals) if hi is None else hi
+    n = len(vals)
+    return [(w * i / max(n - 1, 1), bot - (bot - top) * (v - lo) / ((hi - lo) or 1)) for i, v in enumerate(vals)]
 
 
-spark = _spark()
+def _d(pts):
+    return "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+
+
+WS, WB = fl.wealth(net["Strategy"]).to_numpy(), fl.wealth(net[B]).to_numpy()
+W_LO, W_HI = min(WS.min(), WB.min()), max(WS.max(), WB.max())
+
+
+def _backdrop() -> str:
+    """The real growth paths (strategy and benchmark) as the stage's glowing full-bleed backdrop."""
+    ps, pb = (_pts(w, top=24, bot=292, lo=W_LO, hi=W_HI) for w in (WS, WB))
+    ex, ey = ps[-1]
+    return ("<div class='stg-bd' aria-hidden='true'><div class='stg-bdi'><svg viewBox='0 0 1000 300' preserveAspectRatio='none'>"
+            f"<defs><linearGradient id='stgA' x1='0' x2='0' y1='0' y2='1'><stop offset='0' stop-color='{SC['s']}' "
+            f"stop-opacity='.42'/><stop offset='1' stop-color='{SC['s']}' stop-opacity='0'/></linearGradient></defs>"
+            f"<path class='a' d='{_d(ps)} L1000 300 L0 300 Z' fill='url(#stgA)'/>"
+            f"<path class='b' pathLength='1' d='{_d(pb)}' stroke='{SC['b']}'/>"
+            f"<path class='s' pathLength='1' d='{_d(ps)}' stroke='{SC['s']}'/></svg>"
+            f"<i class='stg-end' style='left:{ex / 10:.2f}%;top:{ey / 3:.2f}%'></i></div></div>")
+
+
+held_last = bt["weights"].loc[net.index[-1]]
+chips = "".join(
+    f"<span class='chip {'in' if held_last.get(t, 0) > 0 else 'out'}' style='--d:{i}'><i></i><b>{t}</b>"
+    f"<small>{core.NAMES[t]}</small><em>{'held' if held_last.get(t, 0) > 0 else 'in cash'}</em></span>"
+    for i, t in enumerate(ui["tickers"]))
+stage_slot.markdown(
+    "<section class='stage'><div class='stg-grid' aria-hidden='true'></div>"
+    "<div class='stg-orb' aria-hidden='true'></div><div class='stg-in'><div class='stg-l'>" + MAST + "</div>"
+    "<div class='stg-r'><div class='k'>Growth of 10,000 EUR, net of costs</div>"
+    f"<div class='mega'><span class='cu-n' data-k='hero'>{10000 * S['final_wealth']:,.0f}</span><small>EUR</small></div>"
+    f"<div class='cmp'><i style='background:{SC['b']}'></i>{BL}: <b>{10000 * T.loc[B, 'final_wealth']:,.0f} EUR</b></div>"
+    f"<div class='hint'>10,000 EUR invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y}, valued at the end "
+    f"of {last:%b %Y}. The glowing line below is that path, month by month.</div>"
+    f"<div class='k chips-k'>Holdings in {last:%b %Y}</div><div class='chips'>{chips}</div>"
+    "</div></div>" + _backdrop() + SPEC + "</section>", unsafe_allow_html=True)
+
 yrs = fl.calendar_years(net)
 yrs = yrs.loc[[y for y in yrs.index if (net.index.year == y).sum() == 12]]
 if len(yrs):
@@ -606,17 +632,14 @@ if len(yrs):
                     for y, r in yrs.iterrows())
     html(f"<div class='tape' title='Calendar-year returns, net of costs (hover to pause)'><div class='tape-in'>"
          f"{items}{items}</div></div>")
+BCOL = "var(--c-b1)" if B == "B1" else "var(--c-b2)"
 html(
-    "<div class='hero'><div>"
-    "<div class='k'>Growth of 10,000 EUR, net of costs</div>"
-    f"<div class='big'><span class='cu-n' data-k='hero'>{10000 * S['final_wealth']:,.0f}</span><small>EUR</small></div>"
-    f"<div class='cmp'>{BL}: <b>{10000 * T.loc[B, 'final_wealth']:,.0f} EUR</b></div>"
-    + spark +
-    f"<div class='hint'>10,000 EUR invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y}, valued at the end of "
-    f"{last:%b %Y}.</div></div>"
-    "<div><div class='k'>Largest fall from a previous high</div><div class='dd'>"
-    + dd_row("Strategy", dd_s, pal["strategy"])
-    + dd_row(B + (" (1/n)" if B == "B1" else " (60/40)"), dd_b, pal["b1"] if B == "B1" else pal["b2"])
+    "<div class='hero ddc'><div class='ddc-l'><div class='k'>Largest fall from a previous high</div>"
+    f"<div class='ddn'><div><b class='cu-n' data-k='dds' style='color:var(--c-s)'>{dd_s:.1%}</b><small>Strategy</small></div>"
+    f"<div><b class='cu-n' data-k='ddb' style='color:{BCOL}'>{dd_b:.1%}</b><small>{BL}</small></div></div></div>"
+    "<div><div class='dd'>"
+    + dd_row("Strategy", dd_s, "var(--c-s)")
+    + dd_row(B + (" (1/n)" if B == "B1" else " (60/40)"), dd_b, BCOL)
     + "<div class='dd-row'><span></span><div class='dd-ax'>"
     f"<span class='t' style='left:{at(core.CLIENT_DD_TARGET)}'>target {core.CLIENT_DD_TARGET:.0%}</span>"
     f"<span class='c' style='left:{at(core.CLIENT_DD_CEILING)}'>ceiling {core.CLIENT_DD_CEILING:.0%}</span>"
@@ -644,25 +667,123 @@ HELP = {
     "beta": "Sensitivity to the benchmark: covariance / variance of monthly excess returns. Not annualised.",
 }
 
-# ---------------------------------------------------------------- the six required measures
+# ---------------------------------------------------------------- the six required measures: a bento of glass cards
+# Each card: the measure (st.metric, the number of record) plus a small picture of the same fm_lean output.
 d_ret, d_vol, d_sh = (S[k] - T.loc[B, k] for k in ("ann_return", "ann_vol", "sharpe"))
-with st.container(key="kpis"):
-    g1, g2 = st.columns(2, gap="large")
-    with g1:
-        html("<div class='grp-h'><span>Risk and return</span><span>monthly data, annualised</span></div>")
-        c = st.columns(3)
-        c[0].metric("Average return p.a.", pct(S["ann_return"]), f"{d_ret * 100:+.1f} pp vs {B}",
-                    help=HELP["ann_return"])
-        c[1].metric("Volatility p.a.", pct(S["ann_vol"]), f"{d_vol * 100:+.1f} pp vs {B}", delta_color="inverse",
-                    help=HELP["ann_vol"])
-        c[2].metric("Sharpe ratio", num(S["sharpe"]), f"{d_sh:+.2f} vs {B}", help=HELP["sharpe"])
-    with g2:
-        html(f"<div class='grp-h'><span>Relative to the benchmark</span><span>{BL}</span></div>")
-        c = st.columns(3)
-        c[0].metric(f"Alpha p.a. vs {B}", pct(S["alpha_ann"]), f"t = {num(S['alpha_t'])}", delta_color="off",
-                    delta_arrow="off", help=HELP["alpha_ann"])
-        c[1].metric("Information ratio (regression)", num(S["information_ratio_regression"]), help=HELP["ir"])
-        c[2].metric(f"Beta vs {B}", num(S["beta"]), help=HELP["beta"])
+ROLL = fl.rolling(net["Strategy"], net[B], bt["rf"]) if len(net) > 36 else pd.DataFrame()
+
+
+def _mv(inner: str, cls: str = "", vb: str = "0 0 200 56", par: str = "none") -> str:
+    return f"<svg class='mv {cls}' viewBox='{vb}' preserveAspectRatio='{par}' aria-hidden='true'>{inner}</svg>"
+
+
+def _cap(text: str) -> str:
+    return f"<div class='mcap'>{text}</div>"
+
+
+def mini_growth() -> str:
+    ps, pb = (_pts(w, w=200, top=4, bot=54, lo=W_LO, hi=W_HI) for w in (WS, WB))
+    return (_mv(f"<path class='ar' d='{_d(ps)} L200 56 L0 56 Z'/><path class='ln b' pathLength='1' d='{_d(pb)}' "
+                f"style='stroke:{BCOL}'/><path class='ln s' pathLength='1' d='{_d(ps)}'/>", "g")
+            + _cap(f"Growth path, strategy vs {B}, {first:%Y} to {last:%Y}"))
+
+
+def mini_vol() -> str:
+    vs, vb = S["ann_vol"], T.loc[B, "ann_vol"]
+    mx = max(vs, vb) or 1
+    return ("<div class='mbars'>"
+            f"<div><span>Strategy</span><i><u style='width:{vs / mx * 100:.1f}%;background:var(--c-s)'></u></i>"
+            f"<b>{pct(vs)}</b></div>"
+            f"<div><span>{B}</span><i><u style='width:{vb / mx * 100:.1f}%;background:{BCOL}'></u></i>"
+            f"<b>{pct(vb)}</b></div></div>" + _cap("Swing of returns, strategy vs benchmark"))
+
+
+def mini_sharpe() -> str:
+    if ROLL.empty:
+        return _cap("The rolling view needs more than 36 months.")
+    v = ROLL["sharpe"].to_numpy()
+    lo, hi = min(v.min(), 0), max(v.max(), 0)
+    pts = _pts(v, w=200, top=4, bot=52, lo=lo, hi=hi)
+    z = 52 - 48 * (0 - lo) / ((hi - lo) or 1)
+    ex, ey = pts[-1]
+    return ("<div class='mvw'>" + _mv(f"<line class='zl' x1='0' x2='200' y1='{z:.1f}' y2='{z:.1f}'/>"
+                                      f"<path class='ln s' pathLength='1' d='{_d(pts)}'/>")
+            + f"<i class='mdot' style='left:{ex / 2:.1f}%;top:{ey / 56 * 100:.1f}%'></i></div>"
+            + _cap(f"Rolling 36-month Sharpe, latest {num(v[-1])}"))
+
+
+def _arc_pt(f: float, r: float = 80) -> tuple[float, float]:
+    return 100 - r * math.cos(math.pi * f), 92 - r * math.sin(math.pi * f)
+
+
+def _arc(frac: float, tick: float, tick_lbl: str, lo_lbl: str, hi_lbl: str, needle: bool) -> str:
+    frac = min(max(frac, 0), 1)
+    trk = "M20 92 A80 80 0 0 1 180 92"
+    inner = (f"<path class='trk' d='{trk}'/><path class='val{' soft' if needle else ''}' pathLength='100' d='{trk}' "
+             f"style='--o:{100 - frac * 100:.1f}'/>")
+    (x1, y1), (x2, y2), (tx, ty) = _arc_pt(tick, 70), _arc_pt(tick, 90), _arc_pt(tick, 104)
+    inner += (f"<line class='tk' x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}'/>"
+              f"<text class='tl' x='{tx:.1f}' y='{ty + 3:.1f}' text-anchor='middle'>{tick_lbl}</text>")
+    if needle:
+        inner += (f"<g class='ndl' style='--a:{-90 + 180 * frac:.1f}deg'><line x1='100' y1='92' x2='100' y2='28'/>"
+                  "<circle cx='100' cy='92' r='5'/></g>")
+    inner += (f"<text class='tl' x='20' y='108' text-anchor='middle'>{lo_lbl}</text>"
+              f"<text class='tl' x='180' y='108' text-anchor='middle'>{hi_lbl}</text>")
+    return _mv(inner, "arc", "-8 -4 216 118", "xMidYMid meet")
+
+
+def mini_alpha() -> str:
+    t = S["alpha_t"]
+    if t is None or pd.isna(t):
+        return _cap("t-statistic not available for these settings")
+    top = max(4.0, abs(t) + 0.5)
+    return (f"<div class='tg'><i><u style='width:{min(abs(t), top) / top * 100:.1f}%'></u>"
+            f"<s style='left:{2 / top * 100:.1f}%'></s></i><div><span>0</span>"
+            f"<span style='left:{2 / top * 100:.1f}%'>|t| = 2</span><span>{top:.0f}</span></div></div>"
+            + _cap(f"|t| = {abs(t):.2f}: {'above' if abs(t) > 2 else 'below'} the usual |t| = 2 line for luck"))
+
+
+def mini_ir() -> str:
+    x = S["information_ratio_regression"]
+    if x is None or pd.isna(x):
+        return _cap("not available for these settings")
+    return _arc(x, 0.5, "0.5", "0", "1", False) + _cap("Scale 0 to 1; 0.5 and above counts as high")
+
+
+def mini_beta() -> str:
+    x = S["beta"]
+    if x is None or pd.isna(x):
+        return _cap("not available for these settings")
+    return (_arc(x / 1.5, 1 / 1.5, "1.0", "0", "1.5", True)
+            + _cap(f"At 1.0 it would move one for one with {B}; at {num(x)} it moves {num(x)} per 1.00 of "
+                   f"{B}'s excess return"))
+
+
+with st.container(key="bento"):
+    html("<div class='grp-h'><span>Risk and return</span><span>monthly data, annualised</span></div>")
+    c = st.columns([1.55, 1, 1], gap="small")
+    with c[0]:
+        st.metric("Average return p.a.", pct(S["ann_return"]), f"{d_ret * 100:+.1f} pp vs {B}", help=HELP["ann_return"])
+        html(mini_growth())
+    with c[1]:
+        st.metric("Volatility p.a.", pct(S["ann_vol"]), f"{d_vol * 100:+.1f} pp vs {B}", delta_color="inverse",
+                  help=HELP["ann_vol"])
+        html(mini_vol())
+    with c[2]:
+        st.metric("Sharpe ratio", num(S["sharpe"]), f"{d_sh:+.2f} vs {B}", help=HELP["sharpe"])
+        html(mini_sharpe())
+    html(f"<div class='grp-h'><span>Relative to the benchmark</span><span>{BL}</span></div>")
+    c = st.columns([1, 1, 1.55], gap="small")
+    with c[0]:
+        st.metric(f"Alpha p.a. vs {B}", pct(S["alpha_ann"]), f"t = {num(S['alpha_t'])}", delta_color="off",
+                  delta_arrow="off", help=HELP["alpha_ann"])
+        html(mini_alpha())
+    with c[1]:
+        st.metric("Information ratio (regression)", num(S["information_ratio_regression"]), help=HELP["ir"])
+        html(mini_ir())
+    with c[2]:
+        st.metric(f"Beta vs {B}", num(S["beta"]), help=HELP["beta"])
+        html(mini_beta())
 
 
 def ir_reg_line(x):
@@ -702,8 +823,8 @@ html("<div class='ch rp-h'><div class='k'>Backtest replay</div><div class='ch-t'
 try:
     html(replay.root(replay.payload(
         bt, data, ui["tickers"], core.NAMES, ui["sma"], ui["lag"], B, BL,
-        dict(strategy=pal["strategy"], bench=pal["b1"] if B == "B1" else pal["b2"], ochre=pal["b1"], loss=pal["loss"],
-             assets=pal["assets"]))))
+        dict(strategy=SC["s"], bench=SC["b"], ochre="#F5B544", loss="#FF6B6E",
+             assets=["#5AA9FF", "#8CC8FF", "#C2E1FF", "#F5B544", "#D69A5C"]))))
     st.html(replay.script(), unsafe_allow_javascript=True)
 except Exception as e:  # noqa: BLE001  (the replay is optional; the page keeps working)
     st.info(f"The replay cannot be shown with these settings ({e}).", icon=":material/info:")
