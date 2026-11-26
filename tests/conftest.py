@@ -28,10 +28,10 @@ def notebook_module_file():
 
 
 def notebook_ipynb():
-    """The notebook built from the current module: build/ while the new version waits for its final Colab run."""
+    """The submitted notebook (folder root); build/ only if the root has none."""
     if NB is None or not NB.exists():
         return None
-    for folder in (NB / "build", NB):
+    for folder in (NB, NB / "build"):
         nbs = sorted(folder.glob("*.ipynb"))
         if nbs:
             return nbs[0]
@@ -39,7 +39,7 @@ def notebook_ipynb():
 
 
 def notebook_results_json():
-    return _nb("build", "output", "results.json") or _nb("output", "results.json")
+    return _nb("output", "results.json") or _nb("build", "output", "results.json")   # official Colab run first
 
 
 def repo_results_json():

@@ -1,5 +1,5 @@
 {
- "retrieved_at": "2026-11-26 16:57 UTC",
+ "retrieved_at": "2026-11-26 17:25 UTC",
  "module_sha256": "a75c318a096da7c61624d16748e38f08ea166399cc0fc28a93feed9fa8a1da83",
  "columns": "month-end adjusted close USD per ticker (DBC, GLD chained to their stand-ins before launch; B3 = MSCI World ETF as a USD price); FX_USDperEUR; RF_EUR_monthly (no shift); RF_USD_overnight_monthly (EFFR); *_next_day = close on the first trading day of the next month"
 }
