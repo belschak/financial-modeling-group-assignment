@@ -1,6 +1,8 @@
 """Plotly figures in the prospectus colours (one palette that reads on light and dark)."""
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -15,16 +17,19 @@ FONT = "Inter, -apple-system, Segoe UI, sans-serif"
 
 def _layout(fig: go.Figure, p: dict, ytitle: str, height: int = 380, yfmt: str | None = None, log: bool = False):
     fig.update_layout(
-        height=height, margin=dict(l=8, r=8, t=44, b=8),
+        height=height, margin=dict(l=4, r=8, t=40, b=4),
         paper_bgcolor=p["paper"], plot_bgcolor=p["paper"],
-        font=dict(family=FONT, size=13),
+        font=dict(family=FONT, size=12),
         hovermode="x unified",
+        hoverlabel=dict(font=dict(family=FONT, size=12), bordercolor=p["grid"]),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)",
-                    entrywidth=168, entrywidthmode="pixels", font=dict(size=12)),
+                    entrywidth=168, entrywidthmode="pixels", font=dict(size=12), itemwidth=40),
     )
-    fig.update_xaxes(showgrid=False, showline=True, linecolor=p["grid"], ticks="outside", tickcolor=p["grid"])
-    fig.update_yaxes(title=dict(text=ytitle, font=dict(color=p["muted"], size=12)), showgrid=True, gridcolor=p["grid"],
-                     zeroline=False, tickformat=yfmt, type="log" if log else "linear")
+    fig.update_xaxes(showgrid=False, showline=True, linecolor=p["grid"], linewidth=1, ticks="outside",
+                     tickcolor=p["grid"], ticklen=4, tickfont=dict(color=p["muted"], size=11))
+    fig.update_yaxes(title=dict(text=ytitle, font=dict(color=p["muted"], size=11), standoff=8), showgrid=True,
+                     gridcolor=p["grid"], griddash="dot", zeroline=False, tickformat=yfmt,
+                     tickfont=dict(color=p["muted"], size=11), type="log" if log else "linear")
     return fig
 
 
@@ -35,8 +40,24 @@ def cumulative(wealth: dict[str, pd.Series], styles: dict[str, dict], p: dict, l
         fig.add_trace(go.Scatter(x=w.index, y=w.values, name=name, mode="lines",
                                  line=dict(color=st["color"], width=st.get("width", 2), dash=st.get("dash")),
                                  hovertemplate="%{y:.2f}"))
+    # Factsheet-style end labels: each series' last value in its own colour, right of the line, nudged apart so
+    # close values do not overlap (positions in axis units; a log axis takes log10 coordinates).
+    tf = (lambda v: math.log10(v)) if log else (lambda v: v)
+    lo = min(tf(w.min()) for w in wealth.values())
+    hi = max(tf(w.max()) for w in wealth.values())
+    gap = 0.06 * (hi - lo or 1)
+    ends = sorted(((tf(w.iloc[-1]), w.iloc[-1], styles[n]["color"], w.index[-1]) for n, w in wealth.items()),
+                  reverse=True)
+    prev = None
+    for y, v, col, x in ends:
+        y = y if prev is None else min(y, prev - gap)
+        prev = y
+        fig.add_annotation(x=x, y=y, text=f"<b>{v:.2f}</b>", showarrow=False, xanchor="left", xshift=6,
+                           font=dict(color=col, size=11))
     fig.add_hline(y=1.0, line=dict(color=p["muted"], width=1, dash="dot"))
-    return _layout(fig, p, "Growth of 1 (start = 1.00)", log=log)
+    fig = _layout(fig, p, "Growth of 1 (start = 1.00)", log=log)
+    fig.update_layout(margin=dict(r=44))
+    return fig
 
 
 def drawdowns(dd: dict[str, pd.Series], styles: dict[str, dict], p: dict) -> go.Figure:
