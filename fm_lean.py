@@ -14,11 +14,11 @@ import pandas as pd
 import requests
 
 VERSION = "lean-2.0"
-# Strategy 2: US equity, developed ex-US equity, US Treasuries 7-10y, US utilities, commodities, gold
+# Six sleeves: US equity, developed ex-US equity, US Treasuries 7-10y, US utilities, commodities, gold
 WEIGHTS = {"SPY": 0.20, "EFA": 0.20, "IEF": 0.20, "XLU": 0.20, "DBC": 0.10, "GLD": 0.10}
 TICKERS = list(WEIGHTS)
 B2_WEIGHTS = {"SPY": 0.36, "EFA": 0.24, "IEF": 0.40}  # classic 60/40 (bonds hedged like the strategy's)
-# Before a fund's first price its index stands in, chained at the fund's first price: DBC (Feb 2006) <- S&P GSCI,
+# Before a fund's first price its index stands in, chained at the fund's first price: DBC (Feb 2006) <- S&P GSCI index level,
 # GLD (Nov 2004) <- gold futures (needed only for GLD's first 10-month average).
 PROXIES = {"DBC": "^SPGSCI", "GLD": "GC=F"}
 # B3 = MSCI World for a euro investor: iShares Core MSCI World UCITS ETF (Acc) on Xetra, EUR prices. Before the ETF's

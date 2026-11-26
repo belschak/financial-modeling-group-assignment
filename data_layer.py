@@ -29,9 +29,33 @@ def load_live() -> dict:
     # Test hook: FM_SIMULATE_LIVE_FAILURE=1 makes the download fail, to check the snapshot fallback.
     if os.environ.get("FM_SIMULATE_LIVE_FAILURE") == "1":
         raise ConnectionError("simulated Yahoo Finance rate limit")
-    d = fl.load_data(last_month_end().strftime("%Y-%m-%d"), fl.TICKERS)
+    d = anchor_b3(fl.load_data(last_month_end().strftime("%Y-%m-%d"), fl.TICKERS))
     d["origin"] = "live"
     return d
+
+
+NOTEBOOK_END = "2025-12-31"   # the notebook's last month (its END)
+
+
+def anchor_b3(d: dict, end: str = NOTEBOOK_END) -> dict:
+    """B3 before the ETF's own returns (to Oct 2009) is the MSCI World index plus the ETF's average monthly gap to it,
+    measured by fl.chain_b3 over the overlap up to the download's last month. A download that runs past the notebook's
+    END would measure a slightly different gap, so B3 is chained again with fl.chain_b3 up to END (exactly the notebook's
+    B3) and continued with the download's own B3 returns after END. Strategy, B1 and B2 do not use B3."""
+    if d["px"].index[-1] <= pd.Timestamp(end):
+        return d
+    months = d["px"].index
+    me = d["daily"].resample("ME").last().reindex(months)
+    nx = fl.first_day_of_next_month(d["daily"]).reindex(months)
+    out = {**d, "px": d["px"].copy(), "px_next": d["px_next"].copy()}
+    a, gap, etf_from = fl.chain_b3(me[fl.B3_ETF], me[fl.B3_INDEX], d["fx"], months, end)
+    b = fl.chain_b3(nx[fl.B3_ETF], nx[fl.B3_INDEX], d["fx_next"], months, end, etf_from)[0]
+    for key, nb in (("px", a), ("px_next", b)):
+        full = d[key]["B3"]
+        t = pd.Timestamp(end)
+        out[key]["B3"] = nb.where(months <= t, nb.loc[t] * full / full.loc[t])
+    out["b3"] = {**d.get("b3", {}), "gap_monthly": gap, "gap_measured_to": end}
+    return out
 
 
 def save_snapshot(d: dict) -> None:

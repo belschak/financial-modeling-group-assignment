@@ -50,7 +50,7 @@ The page follows the viewer's theme: light on the white template, dark with the 
 ## Same calculations as the notebook
 
 All numbers come from **`fm_lean.py` version lean-2.0, SHA-256
-`c1ace3ff4f63c3d72eb1fe9cdb09d244b3a11dba407fd93d3c30d8ac42836f7f`**, the module the notebook writes with
+`a75c318a096da7c61624d16748e38f08ea166399cc0fc28a93feed9fa8a1da83`**, the module the notebook writes with
 `%%writefile` and runs, copied here byte for byte. The app never re-implements a calculation: `core.py` only turns
 the sidebar into calls of `fm_lean.backtest`, `table`, `at_cost`, `breakeven`, `summary_row`, `rolling`,
 `calendar_years` and `monte_carlo`, and slices the net returns over the notebook's crisis and bull-market windows with
@@ -66,6 +66,7 @@ Tests (`pytest -q`, also in GitHub Actions on the pinned `requirements.txt`):
   next-day row, B2-relative measures, turnover, cost drag, breakevens against B1, B2 and B3, the cost table, the crisis
   and bull-market tables, the rolling Sharpe and beta figures, Monte Carlo for all three columns); series start at
   1.00; a benchmark against itself gives beta 1 and alpha 0; every setting runs.
+- `test_live_b3.py`: a live download that runs past Dec 2025 still gives the notebook's B3 (synthetic APIs, offline).
 - `test_app_ui.py`: the real page, driven headlessly: cards equal Table 1, both information ratios shown, client
   target and ceiling equal `results.json`, the stage leads with the worst falls of all four portfolios, crisis cards
   and the bull-market switch equal the notebook, rolling and cost figures equal the notebook, settings change the
@@ -123,7 +124,7 @@ SHA-256 hashes), `python tools/make_snapshot.py --from-notebook <notebook output
 
 Strategy, client and conclusions were chosen by the group and discussed in regular group calls. We used Claude Code (Anthropic) as an assistant: to brainstorm and double-check our ideas against the published research, to help write and test the notebook and app code, and to help draft and lay out the prospectus text. We checked its outputs with 16 automated tests, a fresh Colab run, a second, separately written version of the backtest (same Table 1) and our own review of code, numbers and text against the notebook output.
 
-(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 21 pytest tests for the app.)
+(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 22 pytest tests for the app.)
 
 Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
 future returns.
