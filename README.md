@@ -1,4 +1,4 @@
-# BP Trend-Guarded Multi-Asset: interactive backtest
+# Trend-Guarded Multi-Asset: interactive backtest
 
 Streamlit app for the group assignment of **2270 Financial Modeling, Nova SBE (Fall 2026), Group BP**:
 Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, Bastian Volkery.
