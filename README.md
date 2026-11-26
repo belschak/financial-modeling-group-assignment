@@ -6,15 +6,22 @@ Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridol
 **Live app:** https://financial-modeling-group-bp.streamlit.app
 **Notebook:** `FM-Group-BP-Backtest.ipynb`, submitted on Moodle together with the investor prospectus
 
-![Overview: assumptions in the sidebar, key facts, growth of 10,000 EUR, largest fall against the client's target, the six required measures](docs/screenshot-overview.png)
+![Overview: the worst fall of the strategy against B1, B2 and B3, the client's target and ceiling, and every portfolio's fall from its previous high since 2005](docs/screenshot-overview.png)
 
 On a phone the same page stacks into one column ([phone layout](docs/screenshot-mobile.png)).
 
 ## What it does
 
-The strategy holds five broad asset classes (US equity, developed ex-US equity, US Treasuries 7-10y, US REITs,
-broad commodities) in equal slices of 20%. At each month-end an asset stays invested only while its price is above
-its 10-month moving average (Faber 2007); otherwise its slice moves to euro cash. All returns are in EUR.
+The strategy holds six asset classes at fixed target weights: US equity (SPY), developed ex-US equity (EFA), US
+Treasuries 7-10y hedged to EUR (IEF) and US utilities (XLU) 20% each, broad commodities (DBC) and gold (GLD) 10% each.
+At each month-end a sleeve stays invested only while its price is above its 10-month moving average (Faber 2007);
+otherwise its slice moves to euro cash. All returns are in EUR. Benchmarks: B1 the same mix always invested, B2 the
+classic 60/40, B3 the MSCI World (iShares Core MSCI World UCITS ETF, EUR).
+
+The page leads with crash protection, because the growth paths end close together and the difference is in the falls:
+the worst fall of the strategy against all three benchmarks, the client's 10% target and 20% ceiling, and every
+portfolio's fall from its previous high since 2005. Then the four crises of the notebook (financial crisis, euro crisis,
+Covid, 2022) and, with a switch, the long bull markets where the strategy lags (2009-03 to 2020-01, 2023-2025).
 
 In the sidebar you change the assumptions and every number recalculates:
 
@@ -24,29 +31,30 @@ In the sidebar you change the assumptions and every number recalculates:
 | Signal delay | 1 month | 1 or 2 |
 | Trade at | month-end close | month-end close or the next trading day's close |
 | Trading cost (one-way) | 10 bps (fund level) | 0 to 100 bps (50 = retail stress case) |
-| Backtest period | Jan 2007 to Dec 2025 | Jan 2007 to the last complete month |
-| Assets | all five | any two or more |
-| Benchmark for alpha, beta, IR | B1 equal weight 1/n | B1 or B2 (60/40) |
+| Backtest period | Jan 2005 to Dec 2025 | Jan 2005 to the last complete month |
+| Sleeves | all six | any two or more (the others keep their proportions, scaled to 100%) |
+| Benchmark for alpha, beta, IR | B1 same mix | B1, B2 (60/40) or B3 (MSCI World) |
 
 With the defaults the page shows the badge "Defaults: matches prospectus Table 1". It shows the six measures the
 brief requires (average return, volatility, Sharpe ratio, alpha with its t-statistic, information ratio and beta,
 beta not annualised) against the chosen benchmark. The information ratio appears in both forms: the regression form
-(alpha / residual volatility, the class definition) on the card, and the tracking-error form in the line below. The
-headline compares the largest fall with the client's target of at most 10% (20% hard ceiling) and gives the
-next-trading-day figures beside the month-end base case.
+(alpha / residual volatility, the class definition) on the card, and the tracking-error form in the line below.
 
-Tabs: growth of 1 EUR for the strategy and both benchmarks from the same start value of 1.00, drawdowns, rolling
-36-month Sharpe ratio and beta, calendar-year returns; a metrics table with CSV download; holdings over time;
-turnover, cost drag and breakeven costs; a 10-year Monte Carlo for 10,000 EUR (Lecture 5.3, with a cautious variant
-that halves the historical return above cash); and the method.
+Below a month-by-month replay of the rule, the full set of views (the prospectus keeps only a few): growth of 1 EUR for
+all four portfolios, falls with the crisis windows, rolling 36-month Sharpe ratio and beta, calendar-year returns of
+every portfolio, a metrics table with CSV download, holdings over time, the cost view (turnover, cost drag, breakeven
+costs against B1, B2 and B3, value of 1 EUR from 0 to 100 bps), a 10-year Monte Carlo for 10,000 EUR (Lecture 5.3,
+strategy, 60/40 and MSCI World, with a cautious variant that halves the historical return above cash) and the method.
+The page follows the viewer's theme: light on the white template, dark with the obsidian stage.
 
 ## Same calculations as the notebook
 
-All numbers come from **`fm_lean.py` version lean-1.1, SHA-256
-`5ec1d9a4c10c34db84e8bc8349b94c09227da7606d7762abda94fea80d4eedf2`**, the module the submitted notebook writes with
+All numbers come from **`fm_lean.py` version lean-2.0, SHA-256
+`c1ace3ff4f63c3d72eb1fe9cdb09d244b3a11dba407fd93d3c30d8ac42836f7f`**, the module the notebook writes with
 `%%writefile` and runs, copied here byte for byte. The app never re-implements a calculation: `core.py` only turns
-the sidebar into calls of `fm_lean.backtest`, `table`, `at_cost`, `breakeven`, `rolling`, `calendar_years` and
-`monte_carlo`. The footer and the Method tab print the module version, its SHA-256 and the git commit of the running
+the sidebar into calls of `fm_lean.backtest`, `table`, `at_cost`, `breakeven`, `summary_row`, `rolling`,
+`calendar_years` and `monte_carlo`, and slices the net returns over the notebook's crisis and bull-market windows with
+the notebook's formulas. The footer and the Method tab print the module version, its SHA-256 and the git commit of the running
 code.
 
 Tests (`pytest -q`, also in GitHub Actions on the pinned `requirements.txt`):
@@ -54,21 +62,24 @@ Tests (`pytest -q`, also in GitHub Actions on the pinned `requirements.txt`):
 - `test_module_identity.py`: `fm_lean.py` has the expected SHA-256, the same as `results.json`; on the group's machine
   also identical to the notebook's module and to the `%%writefile` cells inside the .ipynb, and `data/` equal to the
   notebook's current output.
-- `test_app_core.py`: the defaults reproduce the notebook's `results.json` (Table 1 for all four portfolios, the
-  next-day row, B2-relative measures, turnover, cost drag, breakevens, Monte Carlo); series start at 1.00; a
-  benchmark against itself gives beta 1 and alpha 0; every setting runs.
+- `test_app_core.py`: the defaults reproduce the notebook's `results.json` (Table 1 for all five columns, the
+  next-day row, B2-relative measures, turnover, cost drag, breakevens against B1, B2 and B3, the cost table, the crisis
+  and bull-market tables, the rolling Sharpe and beta figures, Monte Carlo for all three columns); series start at
+  1.00; a benchmark against itself gives beta 1 and alpha 0; every setting runs.
 - `test_app_ui.py`: the real page, driven headlessly: cards equal Table 1, both information ratios shown, client
-  target and ceiling equal `results.json`, settings change the numbers, reset works, no traceback at extreme settings,
-  snapshot fallback when the download fails.
+  target and ceiling equal `results.json`, the stage leads with the worst falls of all four portfolios, crisis cards
+  and the bull-market switch equal the notebook, rolling and cost figures equal the notebook, settings change the
+  numbers, reset works, no traceback at extreme settings, snapshot fallback when the download fails.
 
 To check against the notebook folder, put its path in `tests/local_notebook_dir.txt` (git-ignored) or set
 `FM_NOTEBOOK_DIR`.
 
 ## Data
 
-Live, through `fm_lean.load_data` (no API keys): Yahoo Finance adjusted closes via `yfinance`, the ECB Data Portal
-for the euro overnight rate (EONIA to September 2019, then EUR STR), FRED for the US overnight rate (EFFR) and
-EUR/USD. Cached for 12 hours.
+Live, through `fm_lean.load_data` (no API keys): Yahoo Finance adjusted closes via `yfinance` (before their own
+first prices DBC is chained to the S&P GSCI and GLD to gold futures; B3 is the MSCI World ETF, before Nov 2009 the
+MSCI World index plus the ETF's measured gap), the ECB Data Portal for the euro overnight rate (EONIA to September
+2019, then EUR STR), FRED for the US overnight rate (EFFR) and EUR/USD. Cached for 12 hours.
 
 Yahoo sometimes throttles shared cloud servers. The app then shows "Live data unavailable, showing snapshot as of
 ...", never a traceback, and uses `data/snapshot_inputs.csv`: the monthly inputs the notebook run itself exported, so
@@ -104,6 +115,7 @@ SHA-256 hashes), `python tools/make_snapshot.py --from-notebook <notebook output
 | `fm_lean.py` | the notebook's module, unchanged |
 | `data_layer.py` | live download via `fm_lean.load_data`, snapshot fallback |
 | `charts.py` | Plotly figures in the prospectus colours |
+| `glass.py`, `replay.py` | page styling (light and dark) and the month-by-month replay; display only |
 | `data/` | notebook's input snapshot and `results.json` |
 | `tests/`, `tools/` | consistency tests, module sync, snapshot refresh |
 
@@ -111,7 +123,7 @@ SHA-256 hashes), `python tools/make_snapshot.py --from-notebook <notebook output
 
 Strategy, client and conclusions were chosen by the group and discussed in regular group calls. We used Claude Code (Anthropic) as an assistant: to brainstorm and double-check our ideas against the published research, to help write and test the notebook and app code, and to help draft and lay out the prospectus text. We checked its outputs with 16 automated tests, a fresh Colab run, a second, separately written version of the backtest (same Table 1) and our own review of code, numbers and text against the notebook output.
 
-(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 18 pytest tests for the app.)
+(The 16 automated tests and the Colab run refer to the submitted notebook; this repository adds 21 pytest tests for the app.)
 
 Educational project, not investment advice. Hypothetical back-tested results. Past performance does not predict
 future returns.

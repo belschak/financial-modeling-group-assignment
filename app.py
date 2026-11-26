@@ -433,7 +433,7 @@ except Exception as e:  # noqa: BLE001
     st.error(f"{e} Please reload in a few minutes.", icon=":material/cloud_off:")
     st.stop()
 last_month = dl.last_complete_month(data)
-months = pd.period_range("2007-01", last_month.strftime("%Y-%m"), freq="M").strftime("%Y-%m").tolist()
+months = pd.period_range(core.FIRST_MONTH, last_month.strftime("%Y-%m"), freq="M").strftime("%Y-%m").tolist()
 
 # ---------------------------------------------------------------- sidebar: assumptions
 with st.sidebar:
@@ -441,7 +441,7 @@ with st.sidebar:
          "<div class='sb-s'>Change any input and every number recalculates. The defaults reproduce prospectus "
          "Table 1.</div><div class='sb-g'>Trend rule</div>")
     st.slider("Moving-average window (months)", 6, 12, key="sma",
-              help="An asset is held only while its month-end price is above its average over this many months. "
+              help="A sleeve is held only while its month-end price is above its average over this many months. "
                    "10 comes from Faber (2007); we did not optimise it.")
     st.radio("Signal delay (months)", [1, 2], key="lag", horizontal=True,
              help="1: the signal from the close of month t sets the holdings for month t+1. 2: act one month later.")
@@ -459,17 +459,19 @@ with st.sidebar:
         del st.session_state[PKEY]
     st.select_slider("Backtest period", options=months, key=PKEY,
                      value=st.session_state.get(PKEY, (core.DEFAULTS["start"], min(core.DEFAULTS["end"], months[-1]))),
-                     help="Earliest start is Jan 2007: the commodity fund (DBC) starts in Feb 2006 and the rule needs "
-                          "a full moving-average window first.")
-    html("<div class='sb-g'>Assets in the portfolio</div>")
+                     help="Earliest start is Jan 2005, as in the notebook. Before their own first prices, DBC (Feb 2006) "
+                          "and GLD (Nov 2004) are chained to their index (S&P GSCI, gold futures), as disclosed in the "
+                          "prospectus.")
+    html("<div class='sb-g'>Sleeves in the portfolio</div>")
     st.pills("Assets", fl.TICKERS, selection_mode="multi", key="tickers", label_visibility="collapsed",
-             format_func=lambda t: f"{t} · {core.NAMES[t]}",
-             help="Each selected asset gets an equal slice (1/n). Benchmark B1 holds the same assets.")
+             format_func=lambda t: f"{t} · {core.NAMES[t]} · {fl.WEIGHTS[t]:.0%}",
+             help="Target weights: 20% each for SPY, EFA, IEF and XLU, 10% each for DBC and GLD. Deselect a sleeve and "
+                  "the others keep their proportions, scaled up to 100%. B1 always holds the same mix.")
     html("<div class='sb-g'>Benchmark for alpha, beta and IR</div>")
     st.radio("Benchmark", list(core.BENCH), key="bench", label_visibility="collapsed",
-             format_func=lambda b: core.BENCH[b] + (" (same assets)" if b == "B1" else ""),
-             help="B1 holds the same assets in equal weights, so it isolates what the trend filter adds. "
-                  "B2 is the 60% equity / 40% bond mix the client could buy instead.")
+             format_func=lambda b: core.BENCH[b],
+             help="B1 holds the same sleeves, always invested: it isolates what the trend filter adds. B2 is the classic "
+                  "60/40 the client could buy instead. B3 is one world-equity fund (iShares Core MSCI World UCITS, EUR).")
     with st.expander("Data source"):
         st.radio("Data", ["live", "snapshot"], key="data_pref", label_visibility="collapsed",
                  format_func=lambda s: "Live: Yahoo Finance, ECB, FRED" if s == "live" else "Stored snapshot (offline)")
@@ -491,19 +493,26 @@ if ui["next_day"] and core.month_end(ui["end"]) > dl.last_complete_month(data, n
     ui["end"] = dl.last_complete_month(data, next_day=True).strftime("%Y-%m")
     notes.append(f"End moved to {core.month_end(ui['end']):%b %Y}: next-day trading needs the first day of the next month.")
 is_default = all(ui[k] == core.DEFAULTS[k] for k in core.DEFAULTS)
+WTS = core.weights(ui["tickers"]) if ui["tickers"] else {}
 
 # ---------------------------------------------------------------- masthead
 LIVE = data["origin"] == "live"
 status = ("<span class='st ok'><i></i>Defaults: matches prospectus Table 1</span>" if is_default else
           "<span class='st cu'><i></i>Custom assumptions: differs from prospectus</span>")
+if len(WTS) == len(fl.TICKERS):
+    SLEEVES = ("Six asset classes in fixed slices: US equity, developed ex-US equity, US Treasuries (hedged to EUR) and "
+               "US utilities 20% each, commodities and gold 10% each.")
+else:
+    SLEEVES = (f"{len(WTS)} asset classes in fixed slices: "
+               + ", ".join(f"{core.NAMES[t].lower().replace('us ', 'US ')} {w:.0%}" for t, w in WTS.items()) + ".")
 MAST = ("<div class='mh-ctx'><span>Hypothetical fund</span><span>Multi-asset trend following</span><span>EUR</span></div>"
         f"<div class='fund'>{core.STRATEGY.replace('Multi-Asset', '<span class=nw>Multi-Asset</span>')}</div>"
-        "<div class='lede'>Five broad asset classes, an equal slice each. At every month-end an asset stays in the "
-        f"portfolio only while its price is above its {ui['sma']}-month average; otherwise its slice waits in euro "
-        "cash. Designed for cautious euro-area savers about 10 years from retirement.</div>"
+        f"<div class='lede'>{SLEEVES} At every month-end a slice stays invested only while its price is above its "
+        f"{ui['sma']}-month average; otherwise it waits in euro cash. Built for cautious euro-area savers about 10 years "
+        "from retirement who cannot sit through a 25% fall.</div>"
         f"<div class='mh-meta'>{status}<span class='st live{'' if LIVE else ' snap'}'><i></i>"
         f"{'Live market data' if LIVE else 'Stored snapshot'}</span></div>")
-# The stage (dark in both themes): masthead now, completed with the headline numbers once the backtest has run.
+# The stage (follows the theme): masthead now, completed with the crash-protection view once the backtest has run.
 stage_slot = st.empty()
 stage_slot.markdown(f"<section class='stage'><div class='stg-in'><div class='stg-l'>{MAST}</div></div></section>",
                     unsafe_allow_html=True)
@@ -512,7 +521,7 @@ if data_warning:
 for n in notes:
     st.info(n, icon=":material/history:")
 if len(ui["tickers"]) < 2:
-    st.warning("Select at least two assets in the sidebar.")
+    st.warning("Select at least two sleeves in the sidebar.")
     st.stop()
 if (pd.Period(ui["end"], "M") - pd.Period(ui["start"], "M")).n < 23:
     st.warning("Choose a backtest period of at least 24 months.")
@@ -533,18 +542,22 @@ B = ui["bench"]
 BL = core.BENCH[B]
 pal = charts.PALETTE
 LBL_S, LBL_G = "Strategy (net)", "Strategy before costs"
+LBL = {"Strategy": LBL_S, **core.BENCH}
+PCOL = {"Strategy": pal["strategy"], "B1": pal["b1"], "B2": pal["b2"], "B3": pal["b3"]}
 styles = {LBL_S: dict(color=pal["strategy"], width=2.6), LBL_G: dict(color=pal["strategy"], width=1.2, dash="dot"),
-          core.BENCH["B1"]: dict(color=pal["b1"], width=2), core.BENCH["B2"]: dict(color=pal["b2"], width=2, dash="dash")}
+          core.BENCH["B1"]: dict(color=pal["b1"], width=2), core.BENCH["B2"]: dict(color=pal["b2"], width=2, dash="dash"),
+          core.BENCH["B3"]: dict(color=pal["b3"], width=1.8)}
+CV = {"Strategy": "var(--c-s)", "B1": "var(--c-b1)", "B2": "var(--c-b2)", "B3": "var(--c-b3)"}   # theme-aware CSS colours
+BCOL = CV[B]
 first, last = net.index[0], net.index[-1]
 trade_at = "next trading day's close" if ui["next_day"] else "month-end close"
 facts = [("Backtest period", f"{first:%b %Y} to {last:%b %Y}"), ("Observations", f"{len(net)} months"),
          ("Trend rule", f"{ui['sma']}-month average, lag {ui['lag']}"), ("Trades at", trade_at),
-         ("Trading cost", f"{ui['cost_bps']} bps one-way"), ("Assets", " · ".join(ui["tickers"])),
-         ("Benchmark", BL), ("Rebalancing", "Monthly, to equal slices")]
+         ("Trading cost", f"{ui['cost_bps']} bps one-way"),
+         ("Sleeves", " · ".join(f"{t} {w * 100:.0f}" for t, w in WTS.items())),
+         ("Benchmark", BL), ("Rebalancing", "Monthly, back to target weights")]
 SPEC = ("<div class='spec' aria-label='Key facts'>"
         + "".join(f"<div><span>{a}</span><b>{b}</b></div>" for a, b in facts) + "</div>")
-# Stage colours: the prospectus hues (navy strategy, ochre B1, grey B2), lit for a dark ground.
-SC = dict(s="#5AA9FF", b="#F5B544" if B == "B1" else "#AEB8CA")
 
 
 def pct(x, d=1):
@@ -559,10 +572,15 @@ def num(x, d=2):
     return f"{0.0 if abs(x) < 0.5 * 10 ** -d else x:.{d}f}"
 
 
+def spct(x, d=1):
+    """Signed percentage, '+4.6%' / '-23.7%' (no '-0.0%')."""
+    return f"{0.0 if abs(x) < 0.5 * 10 ** -(d + 2) else x:+.{d}%}"
+
+
 S = T.loc["Strategy"]
-# ---------------------------------------------------------------- headline: growth of 10,000 EUR, largest fall vs target
-dd_s, dd_b = -S["max_drawdown"], -T.loc[B, "max_drawdown"]
-scale = max(0.4, math.ceil((max(dd_s, dd_b, core.CLIENT_DD_CEILING) + 0.02) * 10) / 10)
+# ---------------------------------------------------------------- the stage: crash protection first
+DD = {k: -T.loc[k, "max_drawdown"] for k in core.PORTS}
+scale = max(0.4, math.ceil((max(*DD.values(), core.CLIENT_DD_CEILING) + 0.02) * 10) / 10)
 
 
 def at(x):
@@ -576,35 +594,65 @@ ticks = (f"<i class='tk' style='left:{at(core.CLIENT_DD_TARGET)}'></i>"
 
 def dd_row(label, v, color):
     return (f"<div class='dd-row'><span class='dd-l'>{label}</span><div class='dd-t'><div class='bar' style='width:"
-            f"{at(v)};background:{color}'></div>{ticks}</div><span class='dd-v'>{v:.1%}</span></div>")
+            f"{at(v)};background:{color}'></div>{ticks}</div><span class='dd-v'>-{v:.1%}</span></div>")
 
 
-def _pts(vals, w=1000.0, top=10.0, bot=290.0, lo=None, hi=None):
-    lo = min(vals) if lo is None else lo
-    hi = max(vals) if hi is None else hi
-    n = len(vals)
-    return [(w * i / max(n - 1, 1), bot - (bot - top) * (v - lo) / ((hi - lo) or 1)) for i, v in enumerate(vals)]
+GAUGE = ("<div class='dd'>" + "".join(dd_row(core.SHORT[k], DD[k], CV[k]) for k in core.PORTS)
+         + "<div class='dd-row'><span></span><div class='dd-ax'>"
+         f"<span class='t' style='left:{at(core.CLIENT_DD_TARGET)}'>target {core.CLIENT_DD_TARGET:.0%}</span>"
+         f"<span class='c' style='left:{at(core.CLIENT_DD_CEILING)}'>ceiling {core.CLIENT_DD_CEILING:.0%}</span>"
+         "</div><span></span></div></div>")
+CARD = {"Strategy": "Strategy", "B1": "B1 mix", "B2": "B2 60/40", "B3": "B3 World"}
+UW_SHORT = {"Financial crisis": "Financial crisis", "Euro crisis": "Euro crisis", "Covid crash": "Covid",
+            "2022 inflation shock": "2022"}
 
 
-def _d(pts):
-    return "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
-
-
-WS, WB = fl.wealth(net["Strategy"]).to_numpy(), fl.wealth(net[B]).to_numpy()
-W_LO, W_HI = min(WS.min(), WB.min()), max(WS.max(), WB.max())
-
-
-def _backdrop() -> str:
-    """The real growth paths (strategy and benchmark) as the stage's glowing full-bleed backdrop."""
-    ps, pb = (_pts(w, top=24, bot=292, lo=W_LO, hi=W_HI) for w in (WS, WB))
-    ex, ey = ps[-1]
-    return ("<div class='stg-bd' aria-hidden='true'><div class='stg-bdi'><svg viewBox='0 0 1000 300' preserveAspectRatio='none'>"
-            f"<defs><linearGradient id='stgA' x1='0' x2='0' y1='0' y2='1'><stop offset='0' stop-color='{SC['s']}' "
-            f"stop-opacity='.42'/><stop offset='1' stop-color='{SC['s']}' stop-opacity='0'/></linearGradient></defs>"
-            f"<path class='a' d='{_d(ps)} L1000 300 L0 300 Z' fill='url(#stgA)'/>"
-            f"<path class='b' pathLength='1' d='{_d(pb)}' stroke='{SC['b']}'/>"
-            f"<path class='s' pathLength='1' d='{_d(ps)}' stroke='{SC['s']}'/></svg>"
-            f"<i class='stg-end' style='left:{ex / 10:.2f}%;top:{ey / 3:.2f}%'></i></div></div>")
+def underwater() -> str:
+    """Every portfolio's fall from its previous high, month by month (fl.drawdown of the net returns), as a full-width
+    lane on the stage. The SVG is stretched to the lane; all text is HTML on top, so nothing is ever distorted."""
+    dds = {k: fl.drawdown(net[k]) for k in core.PORTS}
+    idx = dds["Strategy"].index
+    n = len(idx)
+    floor = min(min(float(v.min()) for v in dds.values()), -core.CLIENT_DD_CEILING) * 1.08
+    H = 200.0
+    y = lambda v: H * v / floor                                   # 0 at the top, the floor at the bottom
+    x = lambda i: 1000.0 * i / (n - 1)
+    pth = lambda s: "M" + " L".join(f"{x(i):.1f} {y(v):.1f}" for i, v in enumerate(s.to_numpy()))
+    fy = lambda v: f"calc(1.3rem + {y(v) / H:.4f} * (100% - 2.7rem))"
+    fx = lambda i: f"calc(2.6rem + {x(i) / 1000:.4f} * (100% - 2.6rem))"
+    svg, lab = [], []
+    for name, a, b in core.CRISES:
+        i0, i1 = idx.get_indexer([core.month_end(a), core.month_end(b)])
+        if i0 < 0 or i1 < 0:
+            continue
+        svg.append(f"<rect class='band' x='{x(i0 - 1):.1f}' y='0' width='{max(x(i1) - x(i0 - 1), 4):.1f}' height='{H:.0f}'/>")
+        lab.append(f"<span class='uw-c' style='left:{fx((i0 + i1) / 2)}'>{UW_SHORT[name]}</span>")
+    step = 0.1 if floor > -0.6 else 0.2
+    g = 0.0
+    while g >= floor:
+        svg.append(f"<line class='gl' x1='0' x2='1000' y1='{y(g):.1f}' y2='{y(g):.1f}'/>")
+        lab.append(f"<span class='uw-y' style='top:{fy(g)}'>{g:.0%}</span>")
+        g = round(g - step, 6)
+    svg.append(f"<line class='tl' x1='0' x2='1000' y1='{y(-core.CLIENT_DD_TARGET):.1f}' y2='{y(-core.CLIENT_DD_TARGET):.1f}'/>"
+               f"<line class='cl' x1='0' x2='1000' y1='{y(-core.CLIENT_DD_CEILING):.1f}' y2='{y(-core.CLIENT_DD_CEILING):.1f}'/>")
+    lab.append(f"<span class='uw-r t' style='top:{fy(-core.CLIENT_DD_TARGET)}'>client target -{core.CLIENT_DD_TARGET:.0%}</span>"
+               f"<span class='uw-r c' style='top:{fy(-core.CLIENT_DD_CEILING)}'>ceiling -{core.CLIENT_DD_CEILING:.0%}</span>")
+    for k in ("B3", "B2", "B1"):
+        svg.append(f"<path class='ln b' d='{pth(dds[k])}' style='stroke:{CV[k]}'/>")
+    ps = pth(dds["Strategy"])
+    svg.append(f"<path class='ar' d='{ps} L1000 0 L0 0 Z'/><path class='ln s' d='{ps}'/>")
+    years = sorted({d.year for d in idx[1:]})
+    every = 4 if len(years) > 12 else 2 if len(years) > 6 else 1
+    for yr in years[::every]:
+        i = idx.get_indexer([pd.Timestamp(f"{yr}-01-31")])[0]
+        if i >= 0:
+            lab.append(f"<span class='uw-x' style='left:{fx(i)}'>{yr}</span>")
+    leg = "".join(f"<span><i style='background:{CV[k]}'></i>{core.SHORT[k]} {-DD[k]:.1%}</span>" for k in core.PORTS)
+    return ("<div class='uw'><div class='uw-h'><span class='k'>Fall from the previous high, month by month, net of costs"
+            f"</span><div class='uw-leg'>{leg}</div></div><div class='uw-p' role='img' aria-label='Drawdown of the strategy "
+            f"and the three benchmarks, {first:%b %Y} to {last:%b %Y}'>"
+            f"<svg viewBox='0 0 1000 {H:.0f}' preserveAspectRatio='none' aria-hidden='true'>{''.join(svg)}</svg>"
+            f"{''.join(lab)}</div></div>")
 
 
 held_last = bt["weights"].loc[net.index[-1]]
@@ -615,37 +663,16 @@ chips = "".join(
 stage_slot.markdown(
     "<section class='stage'><div class='stg-grid' aria-hidden='true'></div>"
     "<div class='stg-orb' aria-hidden='true'></div><div class='stg-in'><div class='stg-l'>" + MAST + "</div>"
-    "<div class='stg-r'><div class='k'>Growth of 10,000 EUR, net of costs</div>"
-    f"<div class='mega'><span class='cu-n' data-k='hero'>{10000 * S['final_wealth']:,.0f}</span><small>EUR</small></div>"
-    f"<div class='cmp'><i style='background:{SC['b']}'></i>{BL}: <b>{10000 * T.loc[B, 'final_wealth']:,.0f} EUR</b></div>"
-    f"<div class='hint'>10,000 EUR invested at the end of {first - pd.offsets.MonthEnd(1):%b %Y}, valued at the end "
-    f"of {last:%b %Y}. The glowing line below is that path, month by month.</div>"
-    f"<div class='k chips-k'>Holdings in {last:%b %Y}</div><div class='chips'>{chips}</div>"
-    "</div></div>" + _backdrop() + SPEC + "</section>", unsafe_allow_html=True)
-
-yrs = fl.calendar_years(net)
-yrs = yrs.loc[[y for y in yrs.index if (net.index.year == y).sum() == 12]]
-if len(yrs):
-    def _sgn(v):
-        return f"<em class='{'up' if v >= 0 else 'dn'}'>{0.0 if abs(v) < 0.0005 else v:+.1%}</em>"
-    items = "".join(f"<span><b>{y}</b>Strategy{_sgn(r['Strategy'])} &nbsp;·&nbsp; {B}{_sgn(r[B])}</span>"
-                    for y, r in yrs.iterrows())
-    html(f"<div class='tape' title='Calendar-year returns, net of costs (hover to pause)'><div class='tape-in'>"
-         f"{items}{items}</div></div>")
-BCOL = "var(--c-b1)" if B == "B1" else "var(--c-b2)"
-html(
-    "<div class='hero ddc'><div class='ddc-l'><div class='k'>Largest fall from a previous high</div>"
-    f"<div class='ddn'><div><b class='cu-n' data-k='dds' style='color:var(--c-s)'>{dd_s:.1%}</b><small>Strategy</small></div>"
-    f"<div><b class='cu-n' data-k='ddb' style='color:{BCOL}'>{dd_b:.1%}</b><small>{BL}</small></div></div></div>"
-    "<div><div class='dd'>"
-    + dd_row("Strategy", dd_s, "var(--c-s)")
-    + dd_row(B + (" (1/n)" if B == "B1" else " (60/40)"), dd_b, BCOL)
-    + "<div class='dd-row'><span></span><div class='dd-ax'>"
-    f"<span class='t' style='left:{at(core.CLIENT_DD_TARGET)}'>target {core.CLIENT_DD_TARGET:.0%}</span>"
-    f"<span class='c' style='left:{at(core.CLIENT_DD_CEILING)}'>ceiling {core.CLIENT_DD_CEILING:.0%}</span>"
-    "</div><span></span></div></div>"
+    f"<div class='stg-r'><div class='k'>Worst fall from a previous high, {first:%b %Y} to {last:%b %Y}</div>"
+    f"<div class='mega'><span class='cu-n' data-k='hero'>-{DD['Strategy'] * 100:.1f}%</span><small>Strategy, net</small></div>"
+    + GAUGE +
     f"<div class='hint'>The client's target is a worst fall of at most {core.CLIENT_DD_TARGET:.0%}, with "
-    f"{core.CLIENT_DD_CEILING:.0%} as the hard ceiling.</div></div></div>")
+    f"{core.CLIENT_DD_CEILING:.0%} as the hard ceiling. 10,000 EUR became {10000 * S['final_wealth']:,.0f} EUR "
+    f"(B1 {10000 * T.loc['B1', 'final_wealth']:,.0f}, B2 {10000 * T.loc['B2', 'final_wealth']:,.0f}, "
+    f"B3 {10000 * T.loc['B3', 'final_wealth']:,.0f}).</div>"
+    f"<div class='k chips-k'>Holdings in {last:%b %Y}</div><div class='chips'>{chips}</div>"
+    "</div></div>" + underwater() + SPEC + "</section>", unsafe_allow_html=True)
+
 if not ui["next_day"]:
     nd = run_cached(tuple(sorted({**ui, "next_day": True, "end": min(ui["end"], dl.last_complete_month(
         data, next_day=True).strftime("%Y-%m"))}.items())), STAMP, core.SHA, data)["table"].loc["Strategy"]
@@ -653,6 +680,82 @@ if not ui["next_day"]:
          f"{num(nd['sharpe'])}, largest fall {-nd['max_drawdown']:.1%}. <span class='src'>{DISCLAIMER}</span></div>")
 else:
     html(f"<div class='after'><span class='src'>{DISCLAIMER}</span></div>")
+
+
+def sec_head(k: str, title: str, sub: str):
+    html(f"<div class='sec-h ch'><div class='k'>{k}</div><div class='ch-t'>{title}</div><div class='ch-s'>{sub}</div></div>")
+
+
+def dv_rows(vals: dict, lo: float, hi: float, labels: dict) -> str:
+    """Diverging bars around zero, one per portfolio, on a shared scale lo..hi."""
+    span = (hi - lo) or 1
+    z = -lo / span
+    out = []
+    for k, v in vals.items():
+        left, width = z + min(v, 0) / span, abs(v) / span
+        out.append(f"<div><span>{labels[k]}</span><i style='--z:{z * 100:.1f}%'><u style='left:{left * 100:.2f}%;"
+                   f"width:{width * 100:.2f}%;background:{CV[k]};--o:{'right' if v < 0 else 'left'}'></u></i>"
+                   f"<b class='{'pos' if v >= 0 else 'neg'}'>{spct(v)}</b></div>")
+    return "<div class='dv'>" + "".join(out) + "</div>"
+
+
+# ---------------------------------------------------------------- four crises (notebook section 7, same windows)
+CR = core.crises(bt)
+if len(CR):
+    vals = CR[list(core.PORTS)].astype(float)
+    lo, hi = min(float(vals.min().min()), 0.0), max(float(vals.max().max()), 0.0)
+    sec_head("Crash protection", "How it held up in the crises",
+             "Total return from the first to the last month of each window, net of costs: the same windows as the "
+             "notebook's crisis table.")
+    cards = ""
+    for name, r in CR.iterrows():
+        v = float(r["Strategy"])
+        cards += (f"<div class='crc'><div class='cn'>{name}</div><div class='cd'>{core.month_end(r['start']):%b %Y} to "
+                  f"{core.month_end(r['end']):%b %Y}</div><div class='cv {'pos' if v >= 0 else 'neg'}'>{spct(v)}</div>"
+                  "<div class='cs'>Strategy over the window</div>"
+                  + dv_rows({k: float(r[k]) for k in core.PORTS}, lo, hi, CARD) + "</div>")
+    html(f"<div class='crg'>{cards}</div>")
+
+# ---------------------------------------------------------------- the price: long bull markets (notebook section 8)
+BU = core.bull_markets(bt)
+WHOLE = "Whole period"
+opts = list(BU.index) + [WHOLE]
+sec_head("The price of protection", "Where it lags: long bull markets",
+         "The rule re-enters a sleeve only after its price is back above its average, so in steady rallies it trails "
+         "the always-invested portfolios. Compound return a year over each window, net of costs (the notebook's "
+         "bull-market table).")
+if st.session_state.get("bull_win") not in opts:
+    st.session_state["bull_win"] = opts[0]
+with st.container(key="bull"):
+    win = st.segmented_control("Window", opts, key="bull_win", label_visibility="collapsed",
+                               format_func=lambda o: o if o == WHOLE else f"{BU.loc[o, 'start'][:4]}-{BU.loc[o, 'end'][:4]}: "
+                               + ("crisis low to Covid" if BU.loc[o, "start"] == "2009-03" else "rally")) or opts[0]
+    if win == WHOLE:
+        a, b = f"{first:%Y-%m}", f"{last:%Y-%m}"
+    else:
+        a, b = BU.loc[win, "start"], BU.loc[win, "end"]
+    xw = net.loc[a:b]
+    cg = {k: float((1 + xw[k]).prod() ** (12 / len(xw)) - 1) for k in core.PORTS}
+    wf = {k: float(fl.drawdown(xw[k]).min()) for k in core.PORTS}
+    lead = max(("B1", "B2", "B3"), key=lambda k: cg[k])
+    gap = cg[lead] - cg["Strategy"]
+    verdict = (f"The strategy grew <b>{pct(cg['Strategy'])}</b> a year, {gap * 100:.1f} percentage points a year less "
+               f"than {core.SHORT[lead]} ({pct(cg[lead])})." if gap > 0 else
+               f"The strategy grew <b>{pct(cg['Strategy'])}</b> a year, ahead of all three benchmarks.")
+    c1, c2 = st.columns([1, 1.75], gap="medium")
+    with c1:
+        html(f"<div class='blc'><div class='cn'>{win if win != WHOLE else 'Whole backtest'}</div>"
+             f"<div class='cd ch-s'>{core.month_end(a):%b %Y} to {core.month_end(b):%b %Y}, {len(xw)} months</div>"
+             f"<div class='cv'>{pct(cg['Strategy'])}<small>a year</small></div>"
+             f"<div class='cs'>{verdict} What it bought: a worst fall of {pct(wf['Strategy'])} against "
+             f"{pct(wf['B3'])} for the MSCI World over the same months.</div>"
+             + dv_rows(cg, 0.0, max(max(cg.values()), 0.0), core.SHORT) + "</div>")
+    with c2:
+        wb = {LBL[k]: fl.wealth(xw[k]) for k in core.PORTS}
+        fig = charts.cumulative(wb, styles, pal)
+        fig.update_layout(height=340, margin=dict(t=40))
+        fig.update_yaxes(title=dict(text=f"Growth of 1 from {core.month_end(a) - pd.offsets.MonthEnd(1):%b %Y}"))
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 HELP = {
     "ann_return": "Average monthly return x 12 (arithmetic, as the brief asks). The growth rate actually earned "
@@ -671,6 +774,21 @@ HELP = {
 # Each card: the measure (st.metric, the number of record) plus a small picture of the same fm_lean output.
 d_ret, d_vol, d_sh = (S[k] - T.loc[B, k] for k in ("ann_return", "ann_vol", "sharpe"))
 ROLL = fl.rolling(net["Strategy"], net[B], bt["rf"]) if len(net) > 36 else pd.DataFrame()
+
+
+def _pts(vals, w=1000.0, top=10.0, bot=290.0, lo=None, hi=None):
+    lo = min(vals) if lo is None else lo
+    hi = max(vals) if hi is None else hi
+    n = len(vals)
+    return [(w * i / max(n - 1, 1), bot - (bot - top) * (v - lo) / ((hi - lo) or 1)) for i, v in enumerate(vals)]
+
+
+def _d(pts):
+    return "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+
+
+WS, WB = fl.wealth(net["Strategy"]).to_numpy(), fl.wealth(net[B]).to_numpy()
+W_LO, W_HI = min(WS.min(), WB.min()), max(WS.max(), WB.max())
 
 
 def _mv(inner: str, cls: str = "", vb: str = "0 0 200 56", par: str = "none") -> str:
@@ -759,6 +877,8 @@ def mini_beta() -> str:
                    f"{B}'s excess return"))
 
 
+sec_head("The six measures of the brief", f"How the strategy compares with {BL}",
+         "Each card: the measure, and a small picture of the same result. Change the benchmark in the sidebar.")
 with st.container(key="bento"):
     html("<div class='grp-h'><span>Risk and return</span><span>monthly data, annualised</span></div>")
     c = st.columns([1.55, 1, 1], gap="small")
@@ -816,15 +936,15 @@ def source(text: str):
 
 # ---------------------------------------------------------------- backtest replay (display only, fm_lean outputs)
 html(replay.CSS)
-html("<div class='ch rp-h'><div class='k'>Backtest replay</div><div class='ch-t'>Watch the rule work, month by month</div>"
-     f"<div class='ch-s'>Press play, pick a crisis or drag the timeline. Each month the five lights show which funds closed "
-     f"above their {ui['sma']}-month average and are held; the others wait in euro cash. Same backtest as every number "
-     "on this page.</div></div>")
+sec_head("Backtest replay", "Watch the rule work, month by month",
+         f"Press play, pick a crisis or drag the timeline. Each month the lights show which sleeves closed above their "
+         f"{ui['sma']}-month average and are held; the others wait in euro cash. The ring shows each sleeve at its "
+         f"target weight. Same backtest as every number on this page.")
 try:
     html(replay.root(replay.payload(
         bt, data, ui["tickers"], core.NAMES, ui["sma"], ui["lag"], B, BL,
-        dict(strategy=SC["s"], bench=SC["b"], ochre="#F5B544", loss="#FF6B6E",
-             assets=["#5AA9FF", "#8CC8FF", "#C2E1FF", "#F5B544", "#D69A5C"]))))
+        dict(strategy="var(--c-s)", bench=BCOL, ochre="var(--ochre)", loss="var(--loss)",
+             assets=[f"var(--a{i})" for i in range(1, 7)]))))
     st.html(replay.script(), unsafe_allow_javascript=True)
 except Exception as e:  # noqa: BLE001  (the replay is optional; the page keeps working)
     st.info(f"The replay cannot be shown with these settings ({e}).", icon=":material/info:")
@@ -841,39 +961,72 @@ def guard(view: str):
         st.info(f"{view} cannot be shown with these settings ({e}).", icon=":material/info:")
 
 
-t_perf, t_table, t_hold, t_cost, t_mc, t_method = st.tabs(
-    ["Performance", "All metrics", "Holdings", "Costs", "10-year outlook", "Method"])
+sec_head("In depth", "Every view of the backtest",
+         "The prospectus keeps a few charts; the full set lives here, all from the same run as the numbers above.")
+(t_grow, t_fall, t_roll, t_year, t_table, t_hold, t_cost, t_mc, t_method) = st.tabs(
+    ["Growth", "Falls", "Risk over time", "Calendar years", "All metrics", "Holdings", "Costs", "10-year outlook",
+     "Method"])
 CFG = {"displayModeBar": False}
-with t_perf, guard("This view"):
-    w = {LBL_S: fl.wealth(net["Strategy"])}
+with t_grow, guard("This view"):
     chart_head("Growth of 1 EUR, net of costs",
-               f"Strategy and both benchmarks from the same start value of 1.00, {first:%b %Y} to {last:%b %Y}. "
+               f"Strategy and the three benchmarks from the same start value of 1.00, {first:%b %Y} to {last:%b %Y}. "
                "The fund did not exist over this period.")
     c1, c2, _ = st.columns([1, 1.4, 2])
-    log = c1.toggle("Log scale", value=False, help="Equal distances on the axis = equal percentage changes.")
+    log = c1.toggle("Log scale", value=True, help="Equal distances on the axis = equal percentage changes.")
     show_gross = c2.toggle("Show strategy before costs", value=False)
+    w = {LBL_S: fl.wealth(net["Strategy"])}
     if show_gross:
         w[LBL_G] = fl.wealth(net["Strategy gross"])
-    w.update({core.BENCH[b]: fl.wealth(net[b]) for b in ("B1", "B2")})
+    w.update({core.BENCH[b]: fl.wealth(net[b]) for b in ("B1", "B2", "B3")})
     st.plotly_chart(charts.cumulative(w, styles, pal, log=log), width="stretch", config=CFG)
-    source(f"{SRC} {DISCLAIMER}")
-    chart_head("Drawdown: fall from the previous high",
-               f"How far each portfolio stood below its own earlier peak. The client's target is at most "
-               f"{core.CLIENT_DD_TARGET:.0%}.")
-    dd = {LBL_S: fl.drawdown(net["Strategy"]), **{core.BENCH[b]: fl.drawdown(net[b]) for b in ("B1", "B2")}}
-    st.plotly_chart(charts.drawdowns(dd, styles, pal), width="stretch", config=CFG)
-    if len(net) > 36:
-        chart_head("Is the edge stable over time?",
-                   f"Sharpe ratio and beta vs {B} of the strategy over rolling 36-month windows.")
-        st.plotly_chart(charts.rolling_lines(fl.rolling(net["Strategy"], net[B], bt["rf"]), pal, B), width="stretch",
-                        config=CFG)
-    years = fl.calendar_years(net)
-    years = years.loc[[y for y in years.index if (net.index.year == y).sum() == 12]]
-    chart_head(f"Calendar-year returns: strategy vs {B}", "Complete calendar years only, net of costs.")
-    st.plotly_chart(charts.annual_bars(years, ["Strategy", B], [LBL_S, BL],
-                                       [pal["strategy"], pal["b1"] if B == "B1" else pal["b2"]], pal),
+    source(f"{SRC} All series start at exactly 1.00 on the same date. The lines end close together; the difference is "
+           f"in the path, see Falls. {DISCLAIMER}")
+
+with t_fall, guard("This view"):
+    chart_head("Falls from the previous high",
+               f"How far each portfolio stood below its own earlier peak, {first:%b %Y} to {last:%b %Y}. Shaded: the "
+               "notebook's crisis windows.")
+    dd = {LBL[k]: fl.drawdown(net[k]) for k in core.PORTS}
+    bands = [(core.month_end(a) - pd.offsets.MonthEnd(1), core.month_end(b), UW_SHORT[n]) for n, a, b in core.CRISES
+             if core.month_end(a) >= first and core.month_end(b) <= last]
+    st.plotly_chart(charts.drawdowns(dd, styles, pal, core.CLIENT_DD_TARGET, core.CLIENT_DD_CEILING, bands),
                     width="stretch", config=CFG)
-    source(f"{SRC} All series start at exactly 1.00 on the same date. {DISCLAIMER}")
+    rec = lambda k: (T.loc[k, "recovery"] or "not yet")
+    st.dataframe(pd.DataFrame([{"Portfolio": LBL[k], "Worst fall": pct(T.loc[k, "max_drawdown"]),
+                                "From peak": T.loc[k, "peak"], "To bottom": T.loc[k, "trough"],
+                                "Back at the old high": rec(k),
+                                "Months to recover": "not yet" if pd.isna(T.loc[k, "months_trough_to_recovery"])
+                                else f"{T.loc[k, 'months_trough_to_recovery']:.0f}",
+                                "Worst 12 months": pct(T.loc[k, "worst_12m"]), "Worst month": pct(T.loc[k, "worst_month"])}
+                               for k in core.PORTS]), hide_index=True, width="stretch")
+    source(f"{SRC} {DISCLAIMER}")
+
+with t_roll, guard("This view"):
+    if len(net) > 36:
+        rv = core.rolling_view(bt, B)
+        chart_head("Is the edge stable over time?",
+                   f"Sharpe ratio of the strategy and of {B} over rolling 36-month windows, and the strategy's beta "
+                   f"against {B}. The strategy's Sharpe ratio was above {B}'s in {rv['share_above']:.0%} of all windows; "
+                   f"its beta stayed between {rv['beta_min']:.2f} and {rv['beta_max']:.2f}.")
+        st.plotly_chart(charts.rolling_lines(rv["strategy"], rv["bench"], pal, B, PCOL[B]), width="stretch", config=CFG)
+        source(f"{SRC} Past data only: each point uses the 36 months up to that month. {DISCLAIMER}")
+    else:
+        st.info("The rolling view needs a backtest period of more than 36 months.", icon=":material/info:")
+
+with t_year, guard("This view"):
+    years = fl.calendar_years(net[list(core.PORTS)])
+    years = years.loc[[y for y in years.index if (net.index.year == y).sum() == 12]]
+    if len(years):
+        ahead = int((years["Strategy"] > years[B]).sum())
+        chart_head("Calendar-year returns, net of costs",
+                   f"Complete calendar years only. The strategy beat {B} in {ahead} of {len(years)} years; its worst "
+                   f"year was {spct(years['Strategy'].min())} ({years['Strategy'].idxmin()}), {B}'s "
+                   f"{spct(years[B].min())} ({years[B].idxmin()}).")
+        st.plotly_chart(charts.annual_heatmap(years, [core.SHORT[k] for k in core.PORTS], pal), width="stretch",
+                        config=CFG)
+        source(f"{SRC} {DISCLAIMER}")
+    else:
+        st.info("No complete calendar year in the chosen period.", icon=":material/info:")
 
 ROWS = [
     ("ann_return", "Average return p.a.", pct, True),
@@ -885,6 +1038,7 @@ ROWS = [
     ("beta", f"Beta (vs {B}, not annualised)", num, True),
     ("alpha_t", "Alpha t-statistic", num, False),
     ("cagr", "Growth rate p.a. (CAGR)", pct, False),
+    ("final_wealth", "Value of 1 EUR at the end", num, False),
     ("max_drawdown", "Maximum drawdown", pct, False),
     ("months_trough_to_recovery", "Months from bottom back to the old high",
      lambda x: "not yet" if x is None or pd.isna(x) else f"{x:.0f}", False),
@@ -892,10 +1046,11 @@ ROWS = [
     ("tracking_error", f"Tracking error p.a. (vs {B})", pct, False),
 ]
 with t_table, guard("The metrics table"):
-    chart_head("All measures, four portfolios",
+    chart_head("All measures, five columns",
                f"Monthly data, {first:%b %Y} to {last:%b %Y}, in EUR. Excess returns use the euro cash rate. Relative "
                f"measures are against {BL}; a benchmark against itself gives beta 1, alpha 0 (sanity check).")
-    cols = {"Strategy": "Strategy (net)", "Strategy gross": "Before costs", "B1": "B1 Static 1/n", "B2": "B2 60/40"}
+    cols = {"Strategy": "Strategy (net)", "Strategy gross": "Before costs", "B1": "B1 Same mix", "B2": "B2 60/40",
+            "B3": "B3 MSCI World"}
     table = pd.DataFrame({lbl: [f(T.loc[col, k]) for k, _, f, _ in ROWS] for col, lbl in cols.items()})
     table.insert(0, "Brief", ["Required" if req else "Extra" for *_, req in ROWS])
     table.insert(0, "Measure", [lbl for _, lbl, _, _ in ROWS])
@@ -912,9 +1067,15 @@ with t_table, guard("The metrics table"):
 with t_hold, guard("The holdings view"):
     held = bt["weights"].assign(CASH=1 - bt["weights"].sum(axis=1))
     chart_head(f"On average {1 - held['CASH'].mean():.0%} invested and {held['CASH'].mean():.0%} in cash",
-               "Target weights at the start of each month. A slice moves fully to cash when its fund closes a month "
+               "Target weights at the start of each month. A sleeve moves fully to cash when its fund closes a month "
                "below its moving average, and back when it recovers.")
     st.plotly_chart(charts.weights_area(held, core.NAMES, pal), width="stretch", config=CFG)
+    sw = (bt["signal"].diff().abs() > 0).sum()
+    yrs_n = len(net) / 12
+    st.dataframe(pd.DataFrame([{"Sleeve": f"{t} · {core.NAMES[t]}", "Target weight": f"{WTS[t]:.0%}",
+                                "Months invested": f"{(bt['weights'][t] > 0).mean():.0%}",
+                                "Switches a year": f"{sw[t] / yrs_n:.1f}"} for t in ui["tickers"]]),
+                 hide_index=True, width="stretch")
     source(f"{SRC} {DISCLAIMER}")
 
 with t_cost, guard("The cost view"):
@@ -932,65 +1093,84 @@ with t_cost, guard("The cost view"):
     with st.container(key="kpis_cost"):
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Turnover p.a. (one-way)", pct(cs["turnover_pa"], 0),
-                  help="Half of the value bought plus sold in a year, cash leg included.")
+                  help=f"Half of the value bought plus sold in a year, cash leg included. {B}: {pct(cs['bench_turnover_pa'], 0)}.")
         k2.metric("Cost drag p.a.", pct(cs["cost_drag_pa"], 2), help="Growth rate lost to trading costs per year.")
         t3, h3 = be_fmt(cs["breakeven_cagr"], "growth rate (CAGR)")
         t4, h4 = be_fmt(cs["breakeven_sharpe"], "Sharpe ratio")
         k3.metric(f"Breakeven on return vs {B}", t3, help=h3)
         k4.metric(f"Breakeven on Sharpe vs {B}", t4, help=h4)
     chart_head("Value of 1 EUR at the end of the sample, at different trading costs",
-               f"At {ui['cost_bps']} bps the strategy grows "
+               f"Every portfolio pays the same cost per trade. At {ui['cost_bps']} bps the strategy grows "
                f"{'faster' if S['cagr'] > T.loc[B, 'cagr'] else 'more slowly'} than {B} ({pct(S['cagr'])} vs "
                f"{pct(T.loc[B, 'cagr'])} a year). "
                + (f"Risk-adjusted (Sharpe) it stays ahead up to {t4} per trade." if cs["breakeven_sharpe"]
                   else "Risk-adjusted (Sharpe) it is behind even before costs."))
-    be = cs["breakeven_cagr"]
-    st.plotly_chart(charts.cost_curve(cs["grid"], ui["cost_bps"], be if be is not None and be <= 100 else None,
-                                      (LBL_S, BL), pal, ytitle="Final value of 1 EUR invested", yfmt=".2f"),
-                    width="stretch", config=CFG)
-    source(f"Group calculations. Benchmarks pay the same cost on their trades. {DISCLAIMER}")
+    st.plotly_chart(charts.cost_curve(cs["grid"], ui["cost_bps"], {b: cs["breakeven"][b]["cagr"] for b in ("B1", "B2", "B3")},
+                                      styles, LBL, pal), width="stretch", config=CFG)
+    c1, c2 = st.columns([1, 1.35], gap="medium")
+    with c1:
+        chart_head("Breakeven cost against each benchmark", "One-way cost per trade at which the edge is gone.")
+        st.dataframe(pd.DataFrame([{"Benchmark": core.BENCH[b], "On return (CAGR)": be_fmt(cs["breakeven"][b]["cagr"], "")[0],
+                                    "On Sharpe": be_fmt(cs["breakeven"][b]["sharpe"], "")[0]} for b in ("B1", "B2", "B3")]),
+                     hide_index=True, width="stretch")
+    with c2:
+        chart_head(f"Strategy vs {B} at four cost levels", "50 bps = the lecture's all-in retail figure.")
+        ct = cs["table"]
+        st.dataframe(pd.DataFrame([{"Cost (bps)": f"{c}", "CAGR": pct(r["cagr"], 2), "Sharpe": num(r["sharpe"]),
+                                    "Worst fall": pct(r["max_drawdown"]), f"{B} CAGR": pct(r["benchmark_cagr"], 2),
+                                    f"{B} Sharpe": num(r["benchmark_sharpe"])} for c, r in ct.iterrows()]),
+                     hide_index=True, width="stretch")
+    source(f"Group calculations. Benchmarks pay the same cost on their trades; B3 is one fund and never trades. {DISCLAIMER}")
 
 with t_mc, guard("The 10-year outlook"):
     mc_slot = st.container()
-    haircut = st.toggle("Cautious variant: halve the strategy's historical return above cash", value=False,
+    c1, c2 = st.columns([1.4, 1])
+    haircut = c1.toggle("Cautious variant: halve the strategy's historical return above cash", value=False,
                         help="Published rules often work less well after publication (McLean and Pontiff 2016).")
+    vs = c2.segmented_control("Compare with", ["B2", "B3"], default="B2", format_func=lambda b: core.SHORT[b],
+                              key="mc_vs") or "B2"
     mc = mc_cached(*ARGS, haircut, data)
-    B2L = core.BENCH["B2"]
+    VL = core.MC_COLS[vs]
     with mc_slot:
         chart_head(f"{mc['initial']:,.0f} EUR over the next {mc['months'] // 12} years: range of outcomes",
                    f"Each of {mc['n_sim']:,} paths draws {mc['months']} months at random from the back-tested history "
-                   "(the same months for both portfolios, fixed seed, as in Lecture 5.3). It is not a forecast: it "
+                   "(the same months for every portfolio, fixed seed, as in Lecture 5.3). It is not a forecast: it "
                    "assumes the past sample is representative and ignores taxes. The investment may lead to a "
                    "financial loss.")
-    st.plotly_chart(charts.fan_chart(mc["bands"], {"Strategy": LBL_S, B2L: B2L},
-                                     {"Strategy": pal["strategy"], B2L: pal["b1"]}, pal, "p10", "p90", mc["initial"]),
-                    width="stretch", config=CFG)
-    st.dataframe(pd.DataFrame([{"Portfolio": lbl, "Unfavourable (10th pct.)": f"{sm['p10']:,.0f}",
+    st.plotly_chart(charts.fan_chart({"Strategy": mc["bands"]["Strategy"], VL: mc["bands"][VL]},
+                                     {"Strategy": LBL_S, VL: VL}, {"Strategy": pal["strategy"], VL: PCOL[vs]}, pal,
+                                     "p10", "p90", mc["initial"]), width="stretch", config=CFG)
+    st.dataframe(pd.DataFrame([{"Portfolio": lbl if lbl != "Strategy" else LBL_S,
+                                "Unfavourable (10th pct.)": f"{sm['p10']:,.0f}",
                                 "Median": f"{sm['p50']:,.0f}", "Favourable (90th pct.)": f"{sm['p90']:,.0f}",
                                 "Chance of ending below start": pct(sm["prob_below_start"]),
                                 "Chance of a fall > 20% on the way": pct(sm["prob_drawdown_over_20pct"])}
-                               for name, lbl in (("Strategy", LBL_S), (B2L, B2L)) for sm in [mc["summary"][name]]]),
+                               for lbl in mc["columns"] for sm in [mc["summary"][lbl]]]),
                  hide_index=True, width="stretch")
-    source(f"The strategy ends ahead of {B2L} in {mc['summary']['prob_first_beats_second']:.0%} of the paths. "
-           "Bands: dark = middle 50% of paths, light = 10th to 90th percentile. Values in EUR, after the trading "
+    source(f"The strategy ends ahead of {core.BENCH['B2']} in {mc['summary']['prob_first_beats_second']:.0%} of the "
+           "paths. Bands: dark = middle 50% of paths, light = 10th to 90th percentile. Values in EUR, after the trading "
            f"costs you chose. {DISCLAIMER}")
 
 with t_method, guard("The method note"):
     st.markdown(f"""
-**Data.** Daily adjusted closes (dividends reinvested) from Yahoo Finance for SPY, EFA, IEF, VNQ and DBC, taken on the
-last trading day of each month; the euro cash rate from the ECB (EONIA to September 2019, then EUR STR); the US
+**Data.** Daily adjusted closes (dividends reinvested) from Yahoo Finance for SPY, EFA, IEF, XLU, DBC and GLD, taken on
+the last trading day of each month; the euro cash rate from the ECB (EONIA to September 2019, then EUR STR); the US
 overnight rate (EFFR) and EUR/USD (DEXUSEU) from FRED. US-listed funds stand in for the UCITS funds an EU investor would
-buy, because their history is longer. USD returns are converted with r_EUR = (1 + r_USD) x S(t-1) / S(t) - 1
-(S = USD per EUR); the bond slice (IEF) is EUR-hedged: r_USD + euro cash rate - EFFR.
+buy, because their history is longer. Before their own first prices, DBC (Feb 2006) and GLD (Nov 2004) are chained to
+their index (S&P GSCI, gold futures) at the fund's first price. USD returns are converted with
+r_EUR = (1 + r_USD) x S(t-1) / S(t) - 1 (S = USD per EUR); the bond sleeve (IEF) is EUR-hedged: r_USD + euro cash
+rate - EFFR. The equity sleeves stay unhedged (hedging them lowered the Sharpe ratio in the notebook).
 
-**Rule.** At each month-end an asset is "in" if its USD price is above its simple moving average of the last
+**Rule.** At each month-end a sleeve is "in" if its USD price is above its simple moving average of the last
 {ui['sma']} month-end prices. Holdings decided at the close of month t are held during month t+{ui['lag']}
-(`signal.shift(lag)`), so every decision uses only information available at the time. Each asset has an equal
-slice of 1/n, held either in its fund or in euro cash. With "next trading day's close" the trades (and the returns of
-that month) use the first trading day of the following month instead of the month-end close.
+(`signal.shift(lag) * weights`), so every decision uses only information available at the time. Target weights: SPY,
+EFA, IEF and XLU 20% each, DBC and GLD 10% each; a sleeve is held at its target weight or fully in euro cash. With
+"next trading day's close" the trades (and the returns of that month) use the first trading day of the following month.
 
-**Benchmarks.** B1 = the same assets in static equal weights (what the trend filter adds). B2 = 60% equity (SPY 36%,
-EFA 24%) and 40% IEF (what the client would otherwise buy). Both rebalance monthly and pay the same trading cost.
+**Benchmarks.** B1 = the same six sleeves at the same weights, always invested (what the trend filter adds). B2 = 60%
+equity (SPY 36%, EFA 24%) and 40% IEF (the classic mix the client could buy instead). B3 = the MSCI World: the iShares
+Core MSCI World UCITS ETF in EUR from Nov 2009; before that the MSCI World price index plus the ETF's measured average gap
+to it. All rebalance monthly and pay the same trading cost.
 
 **Costs.** {ui['cost_bps']} bps one-way on every euro of ETF traded back to target each month (weights drift
 within the month; the cash leg is free). Breakeven: the cost at which the strategy's CAGR, or its Sharpe ratio, falls
@@ -1001,13 +1181,15 @@ Sharpe = mean excess return / its standard deviation x sqrt(12); beta = cov / va
 **not annualised**; alpha = OLS intercept x 12, with its t-statistic; information ratio in two forms: regression =
 alpha / standard deviation of the residuals x sqrt(12) (class definition), and tracking error = mean of (strategy
 minus benchmark) / its standard deviation x sqrt(12). Growth curves are cumprod(1 + r) with a start value of 1.00.
+Crisis windows: total return from the first to the last month; bull-market windows: compound return a year.
 
 **Same code as the notebook.** All numbers come from `fm_lean.py` version {fl.VERSION} (SHA-256
-`{core.SHA[:16]}...`), the module the submitted notebook writes with `%%writefile` and runs. Tests in the repository
+`{core.SHA[:16]}...`), the module the notebook writes with `%%writefile` and runs. Tests in the repository
 check that both files are byte-identical and that these defaults reproduce the notebook's results.
 
-**Limitations.** A backtest is not a forecast. US-listed proxies; no taxes and no fund fees beyond those already in the
-fund prices; the 10-month rule is famous, so part of its past success may not repeat (publication bias).
+**Limitations.** A backtest is not a forecast. US-listed proxies and index stand-ins before launch; no taxes and no fund
+fees beyond those already in the fund prices; the 10-month rule is famous, so part of its past success may not repeat
+(publication bias). In long bull markets the strategy trails the always-invested portfolios.
 """)
 
 # ---------------------------------------------------------------- important information (footer)
