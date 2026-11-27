@@ -1,7 +1,15 @@
 # Trend-Guarded Multi-Asset: interactive backtest
 
-Streamlit app for the group assignment of **2270 Financial Modeling, Nova SBE (Fall 2026), Group BP**:
-Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, Bastian Volkery.
+Streamlit app for the group assignment of **2270 Financial Modeling, Nova SBE (Fall 2026), Group BP**.
+
+| Name | Student number |
+|---|---|
+| Tim Fischer | 78818 |
+| Tom Nico H Croe | 78544 |
+| David Konrad Belschak | 78842 |
+| Lennart Schmülling | 79898 |
+| Bastian Volkery | 80448 |
+| Fridolin Treibig | 78467 |
 
 **Live app:** https://financial-modeling-group-bp.streamlit.app
 **Notebook:** `FM-Group-BP-Backtest.ipynb`, submitted on Moodle together with the investor prospectus

@@ -21,8 +21,9 @@ import glass
 import replay
 
 REPO_URL = "https://github.com/belschak/financial-modeling-group-assignment"
-GROUP = ("Tim Fischer, David Konrad Belschak, Tom Nico H Croe, Lennart Schmülling, Fridolin Treibig, "
-         "Bastian Volkery")
+TEAM = [("Tim Fischer", "78818"), ("Tom Nico H Croe", "78544"), ("David Konrad Belschak", "78842"),
+        ("Lennart Schmülling", "79898"), ("Bastian Volkery", "80448"), ("Fridolin Treibig", "78467")]  # = prospectus cover
+GROUP = ", ".join(f"{name} ({no})" for name, no in TEAM)
 DISCLAIMER = "Hypothetical back-tested results. Past performance does not predict future returns."
 COST_STEPS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 LIVE_RETRY_AFTER_S = 600  # after a failed live download, use the snapshot for 10 minutes before trying again
